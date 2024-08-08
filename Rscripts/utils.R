@@ -187,7 +187,7 @@ fit_full_model <- function(pars,dat,parNames,fixpars=NULL,ploidy="2N",glu_dat=NU
       gxi <- glu_dat[glu_dat$glucose==gi&glu_dat$ploidy==ploidy,]
       logf <- log(gxi$fluor)
       yg <- x$G[x$time%in%(gxi$day*24)]
-      logpred <- log(yg*gpar["a"]+gpar["b"])
+      logpred <- log(yg*gpar["a"]/gxi$dilution+gpar["b"])##
       errs <- logpred-logf
       negll_errs <- -dnorm(errs,mean=0,sd=gpar["sd"],log=T)
     }

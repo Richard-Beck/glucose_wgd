@@ -120,6 +120,19 @@ run_mod_trans <- function(p0,times,y0){
 
 ##info required for running or fitting model
 
+plot_curves <- function(pars,ploidy){
+  pars <- exp(pars)
+  with(as.list(pars),{
+    G <- seq(0.001,1,0.001)
+    df <- data.frame(G,ploidy,
+                     div=kp/(1+(g50a/G)^na),
+                     death=kd*(1-1/(1+(g50d/G)^nd)),
+                     cons=v1*(1/(1+(g50a/G)^na))+v2*(1/(1+g50d/G)^nd))
+    df$ploidy <- ploidy
+    df <- reshape2::melt(df,id.vars=c("G","ploidy"))
+  })  
+}
+
 model_info <- function(){
   parnames <- c("theta","kp","kd","kd2","g50a","g50d","na","nd","v1"  ,"v2" ,"N" ,"D")
   lower <-    c(6000   ,0.01,0.01,0.001, 0.001, 0.001, 0.1,0.1 , 1e-8 ,1e-8 ,100 ,1)

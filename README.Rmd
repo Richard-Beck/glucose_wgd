@@ -456,6 +456,7 @@ refit_model <- function(model,ploidy,new_dat,gpar){
 gluconc <- unique(new_dat$bx$glucose)
 
 source(paste0("Rscripts/models/",model,".R"))
+info <- model_info()
 X <- readRDS(paste0("data/prior_pars/",model,"/rev0/",ploidy,".Rds"))$par
 if(model%in%c("modelA","modelA3")){
       X <- readRDS(paste0("data/prior_pars/",model,"/rev0/2N.Rds"))$res
@@ -481,7 +482,7 @@ df
 }
 
 model <- "modelA3"
-
+source(paste0("Rscripts/models/",model,".R"))
 new_dat <- readRDS("data/fitting/fitting_data.Rds")
 new_dat <- melt_data_for_plotting(new_dat)
 gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
