@@ -1,0 +1,154 @@
+---
+title: "phosphate limits"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+Model A2 is a variant on model A which allows cells to have a store of glucose going into the experiment
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/00_modelling_v2/")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+library(roll)
+#source("Rscripts/fitting_v2.R")
+#source("Rscripts/model_v2.R")
+source("Rscripts/utils.R")
+source("Rscripts/models/modelA2.R")
+source("Rscripts/utils.R")
+source("Rscripts/optimisation/fitting_funcs.R")
+source("Rscripts/prediction/competition_predictor.R")
+source("Rscripts/prediction/condition_predictor.R")
+```
+
+Gi represents the internal concentration of "glucose" per cell. This doesnt have to be glucose, it can be ATP ADP NADH glycogen pyruvate or whatever else the cell has inside that it can use for energy. However, all of these are treated as "equivalent to glucose". 
+
+Model A2 has only one additional parameter compared to model A, which is the rate at which cells use up their internal glucose stores.
+```{r}
+
+runA2 <- function(kgi,G0,pars){
+  pars <- c(exp(unlist(pars)),kgi=kgi)
+  out <- data.frame(run_mod(pars,y0=c(N=1000,G=G0)))
+  colnames(out) <- c("hours","N","D","G","Y","Gi")
+  out <- out[,c("hours","N","D","G","Gi")]
+  out <- reshape2::melt(out,id.vars="hours")
+  out$t_half <- -log(0.5)/kgi
+  out
+}
+
+renamr <- c(N="alive\ncells",D="dead\ncells",G="glucose\n(mM, external)",Gi="glucose\n(internal)")
+
+pars <- data.frame(readRDS("best_pars/modelA/2N.Rds")$res)
+pars <- pars[pars$value==min(pars$value),1:12]
+
+kgi <- c(0.1,0.2,0.4,0.8,1.6)
+out <- do.call(rbind,lapply(kgi,runA2,G0=25,pars=pars))
+out$variable <- renamr[out$variable]
+p1 <- ggplot(out,aes(x=hours,y=value,color=t_half,group=t_half))+
+  facet_wrap(~variable,scales="free")+
+  geom_line()+
+  scale_y_continuous()+
+  scale_color_viridis_c("internal\nglucose\nhalf-life\n(hours)")+
+  ggtitle("25mM initial glucose")
+p1
+
+out <- do.call(rbind,lapply(kgi,runA2,G0=1,pars=pars))
+out$variable <- renamr[out$variable]
+p2 <- ggplot(out,aes(x=hours,y=value,color=t_half,group=t_half))+
+  facet_wrap(~variable,scales="free")+
+  geom_line()+
+  scale_y_continuous()+
+  scale_color_viridis_c("internal\nglucose\nhalf-life\n(hours)")+
+  ggtitle("1mM initial glucose")
+p2
+
+```
+
+```{r}
+
+
+load_fit <- function(ploidy){
+  par <- readRDS(paste0("opt_out/modelA2/",ploidy,".Rds"))$res
+  par <- par[order(par[,"value"]),]
+  par <- par[,!colnames(par)%in%c("value","fevals","gevals","convergence")]
+  par <- par[1,]
+  x <- run_full_model(as.numeric(par),names(par),times=seq(0,144,1))
+  d <- load_dat()
+  #ll <- fit_full_model(p2n,d$bx,names(p2n),ploidy=ploidy,glu_dat = d$gx)
+  #print(ll)
+  x$ploidy <- ploidy
+  x <- reshape2::melt(x,id.vars=c("time","glucose","ploidy"))
+  colnames(x)[4] <- "metric"
+  x$day <- x$time/24
+  x$metric <- c(N="alive",D="dead",G="G")[x$metric]
+  return(x)
+}
+
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+
+x <- rbind(load_fit("2N"),load_fit("4N"))
+
+
+p <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+
+p <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric=="G",],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2) 
+p
+
+```
+
+
+
+```{r}
+
+
+load_fit <- function(ploidy){
+  par <- readRDS(paste0("best_pars/modelA/",ploidy,".Rds"))$res
+  par <- par[order(par[,"value"]),]
+  par <- par[,!colnames(par)%in%c("value","fevals","gevals","convergence")]
+  par <- par[1,]
+  par <- c(par[1:12],kgi=0,par[13:14])
+  x <- run_full_model(as.numeric(par),names(par),times=seq(0,144,1))
+  d <- load_dat()
+  #ll <- fit_full_model(p2n,d$bx,names(p2n),ploidy=ploidy,glu_dat = d$gx)
+  #print(ll)
+  x$ploidy <- ploidy
+  x <- reshape2::melt(x,id.vars=c("time","glucose","ploidy"))
+  colnames(x)[4] <- "metric"
+  x$day <- x$time/24
+  x$metric <- c(N="alive",D="dead",G="G")[x$metric]
+  return(x)
+}
+
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+
+x <- rbind(load_fit("2N"),load_fit("4N"))
+
+
+p <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+
+p <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric=="G",],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2) 
+p
+
+```

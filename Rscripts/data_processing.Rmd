@@ -1,0 +1,217 @@
+---
+title: "Aggregate Experimental Data"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+This document contains code for aggregating the data from various experiments for use in the modelling workflow.
+
+Any decisions taken regarding the data processing are also documented here.  
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="U:/data/BreastCancerCellLines/SUM-159")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+
+
+
+```
+
+
+```{r}
+x <- readRDS("00_ilastik_counts.Rds")
+x$uid <- interaction(x$rep,x$condition)
+x <- split(x,f=x$uid)
+
+
+x <- do.call(rbind,lapply(x, function(xi){
+  xi1 <- xi[xi$label=="alive",]
+  xi2 <- xi[xi$label=="dead",]
+  
+  data.frame(hours=xi1$frame*8+8,replicate=xi1$rep,ploidy=xi1$ploidy,
+             glucose=xi1$glucose,alive=xi1$ncells,dead=xi2$ncells)
+}))
+
+row.names(x) <- NULL
+
+write.table(x,"workshop/cell_counts.csv",sep=",",row.names = F)
+
+y <- reshape2::melt(x,id.vars=c("hours","replicate","ploidy","glucose"))
+y$glucose <- paste0("glucose:\n",y$glucose,"mM")
+p <- ggplot(y,aes(x=hours,y=value,color=variable))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p
+
+```
+
+
+```{r}
+x <- readRDS("00_ilastik_counts.Rds")
+
+
+ax <- aggregate(list(alive=x$alive), by =list(hours=x$hours,replicate=x$replicate,
+ploidy=x$ploidy,glucose=x$glucose),sum)
+
+bx <- aggregate(list(ncells=ax$ncells), by =list(frame=ax$frame, ploidy=ax$ploidy,glucose=ax$glucose,metric=ax$metric),mean)
+bx$sd <- aggregate(list(sd=ax$ncells), by =list(frame=ax$frame, ploidy=ax$ploidy,glucose=ax$glucose,metric=ax$metric),sd)$sd
+
+
+totx <- aggregate(list(ncells=ax$ncells), by =list(frame=ax$frame,
+ploidy=ax$ploidy,glucose=ax$glucose),mean)
+totx$sd <- aggregate(list(sd=ax$ncells), by =list(frame=ax$frame,
+ploidy=ax$ploidy,glucose=ax$glucose),sd)$sd
+
+p <- ggplot(bx,aes(x=frame,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+
+p <- ggplot(totx,aes(x=frame,y=ncells,color=ploidy))+
+  facet_grid(rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+```
+```{r}
+x <- read.csv("../data/ANA/220823_Glucose consumption_Sum159_2N_4N.csv")
+colnames(x)[2:6] <- c(0.1,0.5,1,5,25)
+x <- reshape2::melt(x,id.vars=c("rep","day","ploidy"))
+colnames(x)[4:5] <- c("glucose","G")
+saveRDS(x,"../01_data/02_glucose.Rds")
+x <- readRDS("../01_data/02_glucose.Rds")
+x$G <- as.numeric(x$G)
+x$G[is.na(x$G)] <- 0
+gx <- aggregate(list(G=x$G),by=list(day=x$day,ploidy=x$ploidy,glucose=x$glucose),mean)
+gx$sd <- aggregate(list(sd=x$G),by=list(day=x$day,ploidy=x$ploidy,glucose=x$glucose),sd)$sd
+saveRDS(gx,"../01_data/03_aggregated_glucose.Rds")
+p <- ggplot(gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2) 
+p
+```
+Glucose mapping:
+
+```{r}
+meas <- rbind(c(0,0,0),
+      c(0,0,0),
+      c(26,26,26),
+      c(87,89,89),
+      c(372,387,395))
+meas <-data.frame(meas)
+meas$inpt <- c(0.1,0.5,1,5,25)
+
+meas <- reshape2::melt(meas,id.vars="inpt")
+
+x <- meas[meas$value>0,]
+
+fit <- lm(value~inpt,data=x)
+summary(fit)
+
+inpt <- seq(0,25,0.1)
+y <- data.frame(inpt=inpt)
+y$value <- predict(fit,y)
+
+p <- ggplot(meas,aes(x=inpt,y=value))+
+  geom_point()+
+  geom_line(data=y)+
+  scale_x_continuous("Known glucose conc. (mM)")+
+  scale_y_continuous("measured glucose conc. (mg/dL)")+
+  geom_hline(aes(yintercept=20),colour="red",linetype=2)+
+  theme_bw()
+p
+```
+
+```{r}
+
+proc_dat <- function(xi){
+xa <- xi[xi$metric=="alive",]
+xd <- xi[xi$metric=="dead",]
+
+xa$dn <- c(NaN,diff(xa$ncells)/xa$ncells[-nrow(xa)])
+xd$dn <- c(NaN,diff(xd$ncells)/xa$ncells[-nrow(xa)])
+xa$cum <- cumsum(xa$ncells)
+xd$cum <- cumsum(xa$ncells)
+
+tot_cells <- xa$ncells+xd$ncells
+rg <- c(NaN,diff(tot_cells)/tot_cells[-nrow(xa)])
+xa$rg <- rg
+xd$rg <- rg
+rbind(xa,xd)  
+}
+
+cx <- split(bx,f=interaction(bx$ploidy,bx$glucose))
+cx <- do.call(rbind,lapply(cx,proc_dat))
+cx$glucoconst <- cx$glucose/cx$cum
+
+saveRDS(cx,"01_stats.Rds")
+
+p <- ggplot(cx,aes(x=frame,y=dn,color=metric))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()
+p
+
+p <- ggplot(cx[cx$metric=="alive",],aes(x=glucoconst,y=dn,
+                                        color=as.character(glucose),
+                                        shape=ploidy))+
+  geom_point()+
+  scale_x_log10()
+p
+
+
+
+
+
+```
+```{r}
+library(caret)
+x <- readRDS("01_stats.Rds")
+x <- x[!is.na(x$dn)&x$metric=="alive",]
+x <- x[,c("frame","ploidy","glucose","ncells","cum","rg")]
+x$ploidy <- as.numeric(sapply(x$ploidy,function(p) substr(p,1,1)))
+
+model <- train(rg ~ .,
+               data = x,
+               method = "lm")
+y <- predict(model)
+summary(model)
+plot(x$rg,y)
+
+
+```
+
+
+```{r}
+
+err <- function(par,df){
+  
+  y <- abs(par[1])*df$ntime+abs(par[2])*df$ndiv
+  mean((log(y)-log(df$glucose))^2)
+  
+}
+bxx <- bx[bx$glucose<10,]
+x <- split(bxx,f=interaction(bxx$ploidy,bxx$glucose))
+
+df <- do.call(rbind,lapply(x, function(xi){
+  na <- cumsum(xi$ncells[xi$metric=="alive"])
+  ntot <- max(xi$ncells[xi$metric=="alive"]+xi$ncells[xi$metric=="dead"])
+  n0 <- (xi$ncells[xi$metric=="alive"])[1]
+
+  data.frame(ploidy=xi$ploidy[1],glucose=xi$glucose[1], ntime=tail(na,1),ndiv=ntot-n0)
+}))
+
+opt <- optim(c(0.001*runif(1),0.001*runif(1)),err,df=df)
+par <- opt$par
+y <- abs(par[1])*df$ntime+abs(par[2])*df$ndiv
+df$y <- y
+
+
+```

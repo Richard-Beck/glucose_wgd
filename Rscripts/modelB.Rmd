@@ -1,0 +1,483 @@
+---
+title: "phosphate limits"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/00_modelling_v2/")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+library(roll)
+#source("Rscripts/fitting_v2.R")
+#source("Rscripts/model_v2.R")
+source("Rscripts/utils.R")
+source("Rscripts/models/modelB.R")
+source("Rscripts/utils.R")
+source("Rscripts/optimisation/fitting_funcs.R")
+source("Rscripts/prediction/competition_predictor.R")
+source("Rscripts/prediction/condition_predictor.R")
+```
+Check results of optimisation
+
+```{r}
+x <- readRDS("opt_out/modelB/010.Rds")
+x$comments
+x <- data.frame(x$res)
+x <- x[order(x$value),]
+head(x)
+plot(log(x$value))
+
+best <- list(par = unlist(x[1,1:12]),val = x$value[1])
+saveRDS(best,"best_pars/modelB/2N_v2.Rds")
+
+x <- readRDS("opt_out/modelB/011.Rds")
+x$comments
+x <- data.frame(x$res)
+x <- x[order(x$value),]
+head(x)
+plot(log(x$value))
+
+best <- list(par = unlist(x[1,1:12]),value = x$value[1])
+saveRDS(best,"best_pars/modelB/4N_v2.Rds")
+
+```
+
+
+```{r}
+
+
+load_fit <- function(ploidy){
+  p2n <- readRDS(paste0("best_pars/modelB/",ploidy,".Rds"))$par
+  p2n["nd"] <- p2n["nd"]+1
+  x <- run_full_model(as.numeric(p2n),names(p2n),times=seq(0,144,1))
+  d <- load_dat()
+  ll <- fit_full_model(p2n,d$bx,names(p2n),ploidy=ploidy,glu_dat = d$gx)
+  print(ll)
+  x$ploidy <- ploidy
+  x <- reshape2::melt(x,id.vars=c("time","glucose","ploidy"))
+  colnames(x)[4] <- "metric"
+  x$day <- x$time/24
+  x$metric <- c(N="alive",D="dead",G="G")[x$metric]
+  return(x)
+}
+
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+
+x <- rbind(load_fit("2N"),load_fit("4N"))
+
+
+p <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+
+p <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric=="G",],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2) 
+p
+
+```
+```{r}
+
+chain <- readRDS("best_pars/modelB/4N_chain.Rds")
+chainlength <- length(chain[[1]]$ll)
+x <- sapply(1:chainlength, function(i){
+  mean(sapply(chain, function(ci) ci$ll[i]))
+})
+
+plot(x)
+
+
+
+```
+
+```{r}
+unpack_chain <- function(ploidy){
+  chain <- readRDS(paste0("best_pars/modelB/",ploidy,"_chain.Rds"))[[1]]
+  chain <- chain$par[chain$ll<(min(chain$ll)+30),]
+  row.names(chain) <- NULL
+  chain <- tail(chain,round(nrow(chain)/2))
+  chain$id <- 1:nrow(chain)
+  chain <- reshape2::melt(chain,id.vars="id")
+  colnames(chain) <- c("i","parameter","value")
+  chain$ploidy <- ploidy
+  chain
+}
+
+x2 <- unpack_chain("2N")
+x4 <- unpack_chain("4N")
+
+x <- rbind(x2,x4)
+
+p2 <- ggplot(x2,aes(x=exp(value)))+
+  facet_wrap(~parameter,scales="free",nrow = 4)+
+  geom_histogram(bins=15)+
+  scale_x_continuous("",guide = guide_axis(check.overlap = TRUE))+
+  scale_y_continuous("frequency")
+p2
+
+p4 <- ggplot(x4,aes(x=exp(value)))+
+  facet_wrap(~parameter,scales="free",nrow=4)+
+  geom_histogram(bins=15)+
+  scale_x_continuous("",guide = guide_axis(check.overlap = TRUE))+
+  scale_y_continuous("frequency")
+p4
+
+px <- ggplot(x,aes(x=exp(value),fill=ploidy,group=ploidy))+
+  facet_wrap(~parameter,scales="free",nrow = 3)+
+  geom_histogram(bins=15,alpha=0.6,position="identity")+
+  scale_x_continuous("",guide = guide_axis(check.overlap = TRUE))+
+  scale_y_continuous("frequency")
+px
+```
+
+Glucose dynamics plots
+
+```{r}
+
+glucose_dynamics <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- (par['v1']*(1/(1+par['g50a']^par['na']/G^par['na']))+
+                    par['v2']*(1/(1+par['g50d']^par['nd']/G^par['nd'])))/2
+  data.frame(G,division,death,consumption)
+}
+
+wrap_glucose_dynamics <- function(ploidy,N=100){
+  chain <- readRDS(paste0("best_pars/modelB/",ploidy,"_chain.Rds"))[[1]]
+  chain <- chain$par[chain$ll<(min(chain$ll)+30),]
+  row.names(chain) <- NULL
+  chain <- tail(chain,round(nrow(chain)/2))
+  chain <- chain[sample(1:nrow(chain),N),]
+  
+  df <- do.call(rbind,lapply(1:N, function(i){
+    dfi <- glucose_dynamics(chain[i,],exponentiate = T)
+    dfi$rep <- i
+    dfi
+  }))
+  df$ploidy <- ploidy
+  df
+}
+
+df <- rbind(wrap_glucose_dynamics("2N"),
+            wrap_glucose_dynamics("4N"))
+
+df <- reshape2::melt(df,id.vars=c("G","rep","ploidy"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy,group=interaction(ploidy,rep)))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media")+
+  scale_y_continuous("process rate (% of max.)")+
+  theme_bw()
+p
+
+```
+
+
+```{r}
+
+
+
+
+
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+
+x2 <- viz_fits(50,"2N")
+x4 <- viz_fits(50,"4N")
+
+x <- rbind(x2,x4)
+
+
+p1 <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=interaction(rep,metric)))+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p1
+
+p2 <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric=="G",],aes(y=as.numeric(value),group=interaction(metric,rep)))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2) 
+p2
+
+```
+```{r}
+
+x2 <- viz_fits(100,"2N",gluconc = c(0,0.1,0.2,0.5,1))
+x4 <- viz_fits(100,"4N",gluconc = c(0,0.1,0.2,0.5,1))
+
+x <- rbind(x2,x4)
+
+
+p1 <- ggplot(data=x[x$metric%in%c("alive","dead"),],aes(x=day,y=as.numeric(value),color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_line(aes(group=interaction(rep,metric))) 
+p1
+
+p2 <- ggplot(data=x[x$metric=="G",],aes(x=day,y=as.numeric(value)))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_line(aes(group=interaction(rep,metric))) 
+p2
+
+```
+
+```{r}
+df <- rbind(viz_mixexp(0.5,N = 50,times=1:120),
+            viz_mixexp(1,N = 50,times=1:120),
+            viz_mixexp(5,N = 50,times=1:120))
+p <- ggplot(df[df$variable=="alive",],aes(x=hours,y=value,color=ploidy,group=interaction(ploidy,rep)))+
+  facet_grid(rows=vars(G),scales="free")+
+  geom_line()+
+  scale_y_continuous("number of alive cells")+
+  scale_x_continuous("time (hours)")
+p
+
+```
+
+```{r}
+df <- rbind(delta_mixexp(0.5,N = 50,times=1:120),
+            delta_mixexp(1,N = 50,times=1:120),
+            delta_mixexp(5,N = 50,times=1:120))
+
+p <- ggplot(df,aes(x=time))+
+  facet_grid(rows=vars(G),scales="free")+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5)+
+  geom_line(aes(y=middle))+
+  scale_y_continuous("excess of 2N cells")+
+  scale_x_continuous("time (hours)")
+p
+
+```
+```{r}
+mixexp <- function(i,G=1){
+
+c2<- readRDS(paste0("best_pars/modelB/2N_chain.Rds"))
+c4<- readRDS(paste0("best_pars/modelB/4N_chain.Rds"))
+
+p0 <- list(c2[sample(1:nrow(c2),1),],
+           c4[sample(1:nrow(c4),1),])
+#p00 <- p0
+y0 <- list(c(N=500,D=0),c(N=500,D=0))
+
+z <- run_mixmod(p0,times=1:72,y0=y0,G=1)
+time <- z[,"time"]
+delta <- z[,"N1"]-z[,"N2"]
+data.frame(time,delta,rep=i)
+
+}
+
+
+df <- do.call(rbind,lapply(1:100, mixexp))
+
+p <- ggplot(df,aes(x=time,y=delta,group=rep))+
+  geom_line()+
+  scale_x_continuous("hours")+
+  scale_y_continuous("2N cells - 4N cells")+
+  ggtitle("competition experiment with 1mM glucose")
+p
+
+```
+```{r}
+
+unpack_prof <- function(ploidy){
+  p0 <- readRDS(paste0("best_pars/modelB/",ploidy,".Rds"))$par
+  print(p0)
+  pXN <- readRDS(paste0("best_pars/modelB/",ploidy,"_profiles.Rds"))
+  pXN <- lapply(1:length(pXN), function(i){
+    pXNi <- pXN[[i]]
+    pXNi$val <- exp(pXNi$val+p0[pXNi$parameter[1]])
+    pXNi[,c("ll","val","parameter")]
+  })
+  pXN <- do.call(rbind,pXN)
+  pXN <- aggregate(list(ll=pXN$ll), by=list(parval=pXN$val,par=pXN$parameter),min)
+  pXN$ll <- pXN$ll-min(pXN$ll)
+  pXN$ploidy <- ploidy
+  pXN <- pXN[!pXN$par%in%c("N","D"),]
+  pXN
+}
+
+find_conf_ints <- function(xi){
+  ploidy <- xi$ploidy[1]
+  xi <- split(xi,f=xi$par)
+  df <- do.call(rbind,lapply(xi, function(xij){
+    xij <- xij[xij$ll<3.84,]
+    data.frame(parname=xij$par[1],
+               min=min(xij$parval),max=max(xij$parval),
+               est=(xij$parval[which.min(xij$ll)]))
+  }))
+  df$ploidy <- ploidy
+  df
+}
+
+x2 <- unpack_prof("2N")
+x4 <- unpack_prof("4N")
+
+c2 <- find_conf_ints(x2)
+c4 <- find_conf_ints(x4)
+#c4 <- reshape2::melt(c4,id.vars="parname")
+cc <- rbind(c2,c4)
+
+p <- ggplot(cc,aes(x=parname,y=est,color=ploidy,group=ploidy))+
+  geom_point()+
+  geom_errorbar(aes(ymin=min,ymax=max))+
+  scale_y_log10()
+p
+
+p <- ggplot(x2,aes(x=parval,y=ll))+
+  facet_wrap(~par,scales="free")+
+  geom_point()+
+  geom_line()+
+  coord_cartesian(ylim=c(0,30))+
+    ggtitle("2N parameters")+
+    geom_hline(yintercept = 3.4,color="red")+
+  scale_x_continuous("parameter value")+
+  scale_y_continuous("neg. log. lik.")
+p
+
+p <- ggplot(x4,aes(x=parval,y=ll))+
+  facet_wrap(~par,scales="free")+
+  geom_point()+
+  geom_line()+
+  coord_cartesian(ylim=c(0,30))+
+  ggtitle("4N parameters")+
+  geom_hline(yintercept = 3.4,color="red")+
+  scale_x_continuous("parameter value")+
+  scale_y_continuous("neg. log. lik.")
+p
+```
+```{r}
+
+unpack_prof <- function(ploidy){
+  p0 <- readRDS(paste0("best_pars/modelB/",ploidy,".Rds"))$par
+  print(p0)
+  pXN <- readRDS(paste0("best_pars/modelB/",ploidy,"_profiles_adaptive.Rds"))
+  pXN <- lapply(1:length(pXN), function(i){
+    x <- pXN[[i]]
+    val <- exp(do.call(rbind,x$pars)[,x$parameter])
+    
+    data.frame(ll=x$vals,val,parameter=x$parameter)
+  })
+  pXN <- do.call(rbind,pXN)
+  pXN <- aggregate(list(ll=pXN$ll), by=list(parval=pXN$val,par=pXN$parameter),min)
+  pXN$ll <- pXN$ll-min(pXN$ll)
+  pXN$ploidy <- ploidy
+  pXN <- pXN[!pXN$par%in%c("N","D"),]
+  pXN
+}
+
+
+x2 <- unpack_prof("2N")
+x4 <- unpack_prof("4N")
+
+
+
+
+p <- ggplot(x2,aes(x=parval,y=ll))+
+  facet_wrap(~par,scales="free")+
+  #geom_point()+
+  geom_line()+
+  coord_cartesian(ylim=c(0,30))+
+    ggtitle("2N parameters")+
+    geom_hline(yintercept = 3.4,color="red")+
+  scale_x_continuous("parameter value")+
+  scale_y_continuous("neg. log. lik.")
+p
+
+p <- ggplot(x4,aes(x=parval,y=ll))+
+  facet_wrap(~par,scales="free")+
+  geom_point()+
+  geom_line()+
+  coord_cartesian(ylim=c(0,30))+
+  ggtitle("4N parameters")+
+  geom_hline(yintercept = 3.4,color="red")+
+  scale_x_log10("parameter value")+
+  scale_y_continuous("neg. log. lik.")
+p
+```
+
+
+```{r}
+x <- readRDS("predictions/72h_delta_type_modelB.Rds")
+par <- x$opt
+par <- data.frame(do.call(rbind,lapply(par, function(pari) pari$par)))
+x <- x$opt_smm
+par$ll <- x$ll
+p <- ggplot(x,aes(x=z_actual,y=ll))+
+  geom_point()+
+  scale_y_continuous(limits=c(1880,1910))
+p
+```
+
+
+```{r}
+ploidy <- "2N"
+
+get_extreme_pars <- function(ploidy){
+  p0 <- readRDS(paste0("best_pars/modelB/",ploidy,".Rds"))$par
+print(p0)
+pXN <- readRDS(paste0("best_pars/modelB/",ploidy,"_profiles.Rds"))
+
+pXN <- do.call(rbind,lapply(pXN, function(pXNi){
+  pXNi$val <- pXNi$val+p0[pXNi$parameter[1]]
+  colnames(pXNi)[colnames(pXNi)=="val"] <- pXNi$parameter[1]
+  pXNi <- pXNi[,order(colnames(pXNi))]
+}))
+
+pXN <- split(pXN,f=pXN$parameter)
+
+x <- do.call(rbind,lapply(pXN, function(xi){
+  xi <- xi[(xi$ll-min(xi$ll))<3.84,]
+  ids <- c(which.min(xi[,xi$parameter[1]]),which.max(xi[,xi$parameter[1]]))
+  xi[ids,!colnames(xi)%in%c("ll","parameter")]
+}))
+return(x)
+}
+
+
+x2 <- get_extreme_pars("2N")
+x4 <- get_extreme_pars("4N")
+
+```
+
+
+
+
+```{r}
+
+p2N <- readRDS("best_pars/modelB/2N.Rds")$par
+p4N <- readRDS("best_pars/modelB/4N.Rds")$par
+
+#p2N <- p2N[!names(p2N)%in%c("N","D")]
+#p4N <- p4N[!names(p4N)%in%c("N","D")]
+
+G <- 1
+
+y02 <- c(N=500,D=0)
+y04 <- y02
+
+p0 <- list(p2N,p4N)
+y0 <- list(y02,y04)
+
+out <- run_mixmod(p0,times=seq(0,144,1),y0,G)
+
+plot(out)
+```

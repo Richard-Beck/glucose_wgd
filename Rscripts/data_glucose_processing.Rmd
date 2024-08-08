@@ -1,0 +1,87 @@
+---
+title: "glucose data"
+author: "Richard J Beck"
+date: "11/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/01_data/")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+#source("../Rscripts/fitting_v2.R")
+#source("../Rscripts/model_v2.R")
+#source("../Rscripts/utils.R")
+
+```
+
+```{r}
+
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+
+x <- read.table("glucose.csv",sep=",",header=T)
+
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+#x$value <- x$value*x$Dilution
+x0 <- x[x$Dilution==1&x$G>0,]
+
+p0 <- c(150000,20000)*1000
+pars <- abs(optim(p0,fit_log,dat=x0)$par)
+
+xx <- x[x$Dilution>1,]
+xtmp <- xx[xx$ploidy=="NaN",]
+xx$ploidy[xx$ploidy=="NaN"]<-"2N"
+xtmp$ploidy <- "4N"
+xx <- rbind(xx,xtmp)
+xx$glucose <- (xx$value-pars[2])*xx$Dilution/pars[1]
+
+y <- data.frame(G=c(0.001,0.002,seq(0.01,50,0.01)))/1000
+y$value <- (pars[1]*y$G+pars[2])
+
+xxx <- xx[,c("G","day","ploidy","glucose")]
+saveRDS(xxx,file="05_updated_glucose.Rds")
+
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)
+p
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)+
+  scale_x_log10()+
+  scale_y_log10()
+p
+
+p <- ggplot(x,aes(x=value))+
+  geom_histogram(bins=10)+
+  scale_x_log10()
+p
+
+
+p <- ggplot(xx[!xx$ploidy=="NaN",],aes(x=day,y=glucose))+
+  facet_grid(cols=vars(ploidy),rows=vars(G),scales="free")+
+  geom_point()+
+  scale_y_continuous()+
+  geom_hline(yintercept = 0)+
+  geom_hline(aes(yintercept=G))
+p
+
+```
+
+
+```{r}
+x <- read.table("glucose.csv",sep=",",header=T)
+
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+
+
+
+
+```

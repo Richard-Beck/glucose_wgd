@@ -1,0 +1,457 @@
+---
+title: "phosphate limits"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/00_modelling_v2/")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+library(roll)
+#source("Rscripts/fitting_v2.R")
+#source("Rscripts/model_v2.R")
+source("Rscripts/utils.R")
+
+source("Rscripts/utils.R")
+source("Rscripts/optimisation/fitting_funcs.R")
+source("Rscripts/prediction/competition_predictor.R")
+source("Rscripts/prediction/condition_predictor.R")
+rev <- "rev0"
+```
+
+Extract best fits (the best logl values are sure to be in the chains)
+
+```{r}
+
+extract_best <- function(model,ploidy){
+  fi <- paste0(dir,model,"/",rev,"/",ploidy,"_chain.Rds")
+  x <- readRDS(fi)[[1]]
+  
+  ll <- min(x$ll)
+  par <- x$par[x$ll==ll,]
+  
+  list(par=par,ll=ll,ploidy=ploidy,model=model)
+  
+}
+
+dir <- "best_pars/"
+models <- c("modelA","modelB","modelA3")
+
+best <- c(lapply(models, extract_best, ploidy="2N"),
+          lapply(models, extract_best, ploidy="4N"))
+saveRDS(best,paste0("best_pars/all_best_",rev,".Rds"))
+
+```
+
+Extract the best pars from the updated glucose data (temporary until chains are available)
+```{r}
+
+extract_best <- function(model,ploidy){
+  fi <- paste0(dir,model,"/",ploidy,".Rds")
+  x <- readRDS(fi)$res
+  x <- x[x[,"value"]==min(x[,"value"]),]
+  
+  par <- x[!names(x)%in%c("value","fevals","gevals","convergence")]
+  ll <- x["value"]
+  
+  mod <- unlist(strsplit(model,"/"))[1]
+  
+  list(par=par,ll=ll,ploidy=ploidy,model=mod)
+  
+}
+
+dir <- "best_pars/"
+models <- paste0(c("modelA","modelB"),"/",rev)
+
+best <- c(lapply(models, extract_best, ploidy="2N"),
+          lapply(models, extract_best, ploidy="4N"))
+saveRDS(best,paste0("best_pars/all_best_",rev,".Rds"))
+
+```
+
+plot AIC scores
+
+```{r}
+
+x <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+
+x <- do.call(rbind,lapply(x, function(xi) data.frame(ll=-xi$ll,model=xi$model,ploidy=xi$ploidy,Npar=length(xi$par))))
+x$AIC <- x$Npar*2-2*x$ll
+
+p_aic <- ggplot(x,aes(x=AIC,y=model,fill=ploidy,group=interaction(ploidy,model)))+
+  geom_col()+
+  scale_y_discrete("")+
+  scale_x_continuous("AIC")+
+  theme_classic(base_size = 12)
+p_aic
+
+```
+
+
+```{r}
+
+eval_best <- function(px){
+  model <- px$model
+  ploidy <- px$ploidy
+  par <- unlist(px$par)
+  
+  source(paste0("Rscripts/models/",model,".R"))
+  
+  df <- run_full_model(par,names(par))
+  df$day <- df$time/24
+  df <- df[,c("day","N","D","G","glucose")]
+  df$model <- model
+  df$ploidy <- ploidy
+  df
+  
+}
+
+
+best <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+df <- do.call(rbind,lapply(best,eval_best))
+
+df <- reshape2::melt(df,id.vars=c("day","glucose","model","ploidy"))
+colnames(df)[colnames(df)=="variable"] <- "metric"
+df$metric <- c(N="alive",D="dead",G="G")[df$metric]
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+d$gx2 <- d$gx2[d$gx2$glucose%in%d$gx$glucose,]
+
+pn <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric%in%c("alive","dead"),],aes(y=as.numeric(value),linetype=model,group=interaction(metric,model)),size=1)+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2)+
+  scale_color_discrete("")+
+  scale_x_continuous("days")+
+  scale_y_continuous("number of cells")+
+  scale_linetype_discrete("")+
+  theme_classic(base_size = 12)+
+  theme(legend.position = "top",legend.direction = "vertical")
+pn
+
+pg <- ggplot(d$gx1,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric=="G",],aes(y=as.numeric(value),linetype=model,group=interaction(metric,model)))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  scale_linetype_discrete("")+
+  theme_classic(base_size = 12)
+pg
+
+```
+
+```{r}
+
+col1 <- cowplot::plot_grid(pn,labels="A")
+col2 <- cowplot::plot_grid(pg,p_aic,nrow=2,labels=c("B","C"),
+                           rel_heights=c(3,1))
+
+pfits <- cowplot::plot_grid(col1,col2,nrow=1)
+ggsave("figures/fit_comparison.png",pfits,width=8,height=6,units="in")
+
+```
+
+```{r}
+
+wrap_delta_fits <-  function(model,Nstarts=50){
+  x2 <- delta_fits(50,"2N",gluconc = c(0.001,0.1,0.2,0.5,1),model=model)
+  
+  x4 <- delta_fits(50,"4N",gluconc = c(0.001,0.1,0.2,0.5,1),model=model)
+  rbind(x2,x4)
+}
+
+models <- c("modelA","modelB","modelA3")
+
+x <- do.call(rbind,lapply(models,wrap_delta_fits))
+x$glucose <- round(x$glucose,digits=2)
+
+pa <- ggplot(x[x$metric=="alive",],aes(x=day,color=model,group=model,fill=model))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5)+
+  geom_line(aes(y=middle))+
+  scale_y_continuous("number of cells")+
+  scale_x_continuous("time (hours)")+
+  ggtitle("alive cells")
+pa
+
+pd <- ggplot(x[x$metric=="dead",],aes(x=day,color=model,group=model,fill=model))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5)+
+  geom_line(aes(y=middle))+
+  scale_y_continuous("number of cells")+
+  scale_x_continuous("time (hours)")+
+  ggtitle("dead cells")
+pd
+
+
+```
+
+
+```{r}
+base_plot_size=12
+x <- viz_mixexp(G=1,N=50,times=1:120,model="modelA")
+x$days <- x$hours/24
+y <- delta_mixexp(G=1,N = 50,times=0:120,model="modelA")
+y$days <- y$time/24
+
+
+pa <- ggplot(x[x$variable=="alive",],aes(x=days,y=value,colour=ploidy,group=interaction(rep,variable,ploidy)))+
+  geom_line()+
+  scale_y_continuous("number\nof cells")+
+  scale_x_continuous("time (days)")+
+  scale_color_discrete("")+
+  theme_classic(base_size=base_plot_size)
+pa
+
+pb <- ggplot(y,aes(x=days))+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5,show.legend = F)+
+  geom_line(aes(y=middle))+
+    scale_y_continuous("excess of\n2N cells")+
+  scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+pb
+
+top_row <- cowplot::plot_grid(pa,pb,nrow=1,labels=c("A","B"))
+
+```
+
+```{r}
+wrap_delta_mix <- function(model,gluconc,N=300){
+  df <- do.call(rbind,lapply(gluconc,function(G0){
+    delta_mixexp(G0,N = N,times=0:120,model=model)
+  }))
+  df$day <- df$time/24
+  df <- df[,!colnames(df)=="time"]
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB","modelA3")
+x <- do.call(rbind,lapply(models,wrap_delta_mix,gluconc=c(0,0.1,0.25,0.5,1)))
+
+saveRDS(x,"predictions/mixexp.Rds")
+
+
+```
+
+```{r}
+base_plot_size=12
+x <- readRDS("predictions/mixexp.Rds")
+df <- readRDS("../01_data/06_mixexp_counts.Rds")
+
+df$days <- (8+df$frame*8)/24
+df2N <- df[df$label=="2N",]
+df4N <- df[df$label=="4N",]
+
+
+df <- df2N[,c("days","ncells","glucose")]
+df$ncells <- df$ncells-df4N$ncells
+
+dff <- aggregate(list(ncells=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),mean)
+
+dff$sd <- aggregate(list(sd=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),sd)$sd
+colnames(x)[4:5] <- c("glucose","days")
+p1 <- ggplot(dff,aes(x=days))+
+  facet_grid(rows=vars(glucose),scales="free")+
+  geom_ribbon(data=x,aes(ymin=lower,ymax=upper,color=model,group=model,fill=model),alpha=0.5,show.legend = F)+
+  geom_point(aes(y=ncells),show.legend = F)+
+  geom_hline(yintercept = 0,color="red",linetype=2)+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+    scale_y_continuous("excess of 2N cells")+
+  scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+p1
+
+pmix <- ggplot(x,aes(x=days,color=model,group=model,fill=model))+
+  facet_grid(rows=vars(glucose),scales="free")+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5)+
+  geom_line(aes(y=middle))+
+  scale_y_continuous("excess of 2N cells")+
+  scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+pmix
+
+p2 <- ggplot(dff,aes(x=days))+
+  facet_grid(rows=vars(glucose),scales="free")+
+  geom_point(aes(y=ncells))+
+  geom_hline(yintercept = 0,color="red",linetype=2)+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+    scale_y_continuous("excess of 2N cells")+
+    scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+p2
+
+bottom_row <- cowplot::plot_grid(p1,pmix,p2,ncol=3,labels=c("C","D","E"),
+                            rel_widths=c(2,3,2))
+
+pcomp <- cowplot::plot_grid(top_row,bottom_row,nrow=2,rel_heights = c(1,2))
+
+ggsave("figures/competition.png",pcomp,width=7,height=6,units="in")
+
+```
+
+Compare glucose dynamics
+
+```{r}
+
+glucose_dynamics_A <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- par['v']*(1/(1+par['g50c']^par['m']/G^par['m']))
+  data.frame(G,division,death,consumption)
+}
+
+glucose_dynamics_B <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- (par['v1']*(1/(1+par['g50a']^par['na']/G^par['na']))+
+                    par['v2']*(1/(1+par['g50d']^par['nd']/G^par['nd'])))/2
+  data.frame(G,division,death,consumption)
+}
+
+wrap_glucose_dynamics <- function(model,ploidy,N=100,rev="rev0"){
+  chain <- readRDS(paste0("best_pars/",model,"/",rev,"/",ploidy,"_chain.Rds"))[[1]]
+  chain <- chain$par[chain$ll<(min(chain$ll)+30),]
+  row.names(chain) <- NULL
+  chain <- tail(chain,round(nrow(chain)/2))
+  chain <- chain[sample(1:nrow(chain),N),]
+  
+  df <- do.call(rbind,lapply(1:N, function(i){
+    if(model%in%c("modelA","modelA3")) dfi <- glucose_dynamics_A(chain[i,],exponentiate = T)
+    else dfi <- glucose_dynamics_B(chain[i,],exponentiate = T)
+    dfi$rep <- i
+    dfi
+  }))
+  df$ploidy <- ploidy
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB","modelA3")
+
+df <- do.call(rbind,lapply(models, function(m){
+  rbind(wrap_glucose_dynamics(m,"2N"),
+            wrap_glucose_dynamics(m,"4N"))
+}))
+
+df <- reshape2::melt(df,id.vars=c("G","rep","ploidy","model"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy,group=interaction(ploidy,rep)))+
+  facet_grid(rows=vars(variable),cols=vars(model),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)",breaks=c(0.001,0.01,0.1,1,10),labels=c(0.001,"",0.1,"",10))+
+  scale_y_continuous("process rate (per hour)")+
+  theme_classic(base_size=12)
+p
+
+
+
+ggsave("figures/glucose_dynamics.png",width=7,height=5,units="in")
+
+```
+```{r}
+
+glucose_dynamics_A <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- par['v']*(1/(1+par['g50c']^par['m']/G^par['m']))
+  data.frame(G,division,death,consumption)
+}
+
+glucose_dynamics_B <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- (par['v1']*(1/(1+par['g50a']^par['na']/G^par['na']))+
+                    par['v2']*(1/(1+par['g50d']^par['nd']/G^par['nd'])))/2
+  data.frame(G,division,death,consumption)
+}
+
+wrap_glucose_dynamics <- function(model,ploidy){
+  pars <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+  p <- sapply(pars, function(p) p$ploidy)
+  m <- sapply(pars, function(p) p$model)
+  par <- pars[[which(m==model&p==ploidy)]]$par
+  
+  if(model%in%c("modelA","modelA3")){
+    df <-glucose_dynamics_A(par,exponentiate = T)
+  }else{
+    df <- glucose_dynamics_B(par,exponentiate = T)} 
+
+  
+  df$ploidy <- ploidy
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB")
+
+df <- do.call(rbind,lapply(models, function(m){
+  rbind(wrap_glucose_dynamics(m,"2N"),
+            wrap_glucose_dynamics(m,"4N"))
+}))
+
+df <- reshape2::melt(df,id.vars=c("G","ploidy","model"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy,group=ploidy))+
+  facet_grid(rows=vars(variable),cols=vars(model),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)")+
+  scale_y_continuous("process rate (per hour)")+
+  theme_bw()
+p
+
+
+
+```
+
+```{r}
+
+
+
+x2 <- viz_fits(50,"2N",gluconc = c(0,0.1,0.2,0.5,1),model=model)
+x4 <- viz_fits(50,"4N",gluconc = c(0,0.1,0.2,0.5,1),model=model)
+
+x <- rbind(x2,x4)
+
+
+p1 <- ggplot(data=x[x$metric%in%c("alive","dead"),],aes(x=day,y=as.numeric(value),color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_line(aes(group=interaction(rep,metric)))+ggtitle(model)+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p1
+
+
+
+```

@@ -1,0 +1,118 @@
+---
+title: "phosphate limits"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/00_modelling_v2/")
+```
+
+```{r}
+library(pbapply)
+library(ggplot2)
+library(roll)
+#source("Rscripts/fitting_v2.R")
+#source("Rscripts/model_v2.R")
+source("Rscripts/utils.R")
+source("Rscripts/models/model0.R")
+source("Rscripts/utils.R")
+source("Rscripts/optimisation/fitting_funcs.R")
+```
+
+Check results of fitting:
+```{r}
+x <- readRDS("opt_out/model0/003.Rds")
+x$comments
+x <- data.frame(x$res)
+
+best <- x[x$value==min(x$value),1:8]
+saveRDS(best,"best_pars/model0/2N.Rds")
+
+y <- roll::roll_min(x$value,width=nrow(x),min_obs = 1)
+plot(y)
+
+x <- readRDS("opt_out/model0/002.Rds")
+x$comments
+x <- data.frame(x$res)
+
+best <- x[x$value==min(x$value),1:8]
+saveRDS(best,"best_pars/model0/4N.Rds")
+y <- roll::roll_min(x$value,width=nrow(x),min_obs = 1)
+plot(y)
+```
+```{r}
+
+load_fit <- function(ploidy){
+  p2n <- readRDS(paste0("best_pars/model0/",ploidy,".Rds"))
+  x <- run_full_model(as.numeric(p2n),names(p2n),times=seq(0,144,1))
+
+  x$ploidy <- ploidy
+  x <- reshape2::melt(x,id.vars=c("time","glucose","ploidy"))
+  colnames(x)[4] <- "metric"
+  x$day <- x$time/24
+  x$metric <- c(N="alive",D="dead")[x$metric]
+  return(x)
+}
+
+d <- load_dat()
+d$bx$day <- 1/3+d$bx$frame/3
+
+x <- rbind(load_fit("2N"),load_fit("4N"))
+
+x$glucose <- paste0("glucose:\n",x$glucose,"mM")
+d$bx$glucose <- paste0("glucose:\n",d$bx$glucose,"mM")
+d$bx$GF <- factor(d$bx$glucose,levels=c("glucose:\n0.1mM",
+                                        "glucose:\n0.5mM",
+                                        "glucose:\n1mM",
+                                        "glucose:\n5mM",
+                                        "glucose:\n25mM"))
+
+x$GF <- factor(x$glucose,levels=c("glucose:\n0.1mM",
+                                        "glucose:\n0.5mM",
+                                        "glucose:\n1mM",
+                                        "glucose:\n5mM",
+                                        "glucose:\n25mM"))
+
+p <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(GF),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=x[x$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=metric))+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2) 
+p
+
+```
+
+
+Demonstration of how glucose dynamics works for this model:
+```{r}
+
+glucose_dynamics <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['Gmin']/G))
+  death <- par['kd']*(1-1/(1+(par['Gmin']/G)))
+  consumption <- par['v']*(G/(G+par['Gstar']))
+  data.frame(G,division,death,consumption)
+}
+
+par <- c(kp=0.5,kd=1,Gmin=0.5,Gstar=0.1,v=1e-8)
+df <- glucose_dynamics(par)
+
+df <- reshape2::melt(df,id.vars=c("G"))
+
+p <- ggplot(df,aes(x=G,y=value))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)")+
+  scale_y_continuous("process rate (per day)")+
+  theme_bw()
+p
+
+```
+
+

@@ -1,0 +1,162 @@
+---
+title: "classifier_validation"
+author: "Richard J Beck"
+date: "12/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/01_data/classifier_validation")
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+load_counts <- function(fi){
+  
+  labs <- unlist(strsplit(fi,".csv"))[1]
+  labs <- unlist(strsplit(labs,"/"))[3]
+  labs <- unlist(strsplit(labs,"_"))
+  status <- labs[3]
+  set <- labs[1]
+  x <- read.csv(fi)
+  x$n <- 1
+  x <- x[,c("Slice","n")]
+  frame <- 1:34
+  n <- sapply(frame, function(fr) sum(x$Slice==fr))
+  df <- data.frame(frame,n)
+  df$status <- status
+  #df$set <- set
+  df$counter <- "manual"
+  df
+}
+
+
+
+fi <- paste0("livedead/mancounts/",list.files("livedead/mancounts/"))
+df<- do.call(rbind,lapply(fi,load_counts))
+
+x <- read.csv("livedead/ilastik_counts/C01_set1_table.csv")
+
+
+
+relabl_ilastik <- c("alive","dead")
+names(relabl_ilastik) <- c("Label 1", "Label 2")
+x$status <- relabl_ilastik[x$Predicted.Class]
+x <- x[,c("timestep","status")]
+x$timestep <- 1+x$timestep
+x$n <-1
+frame <- 1:34
+
+
+na <- sapply(frame, function(fr) sum(x$timestep==fr&x$status=="alive"))
+nd <- sapply(frame, function(fr) sum(x$timestep==fr&x$status=="dead"))
+  
+xa <- data.frame(frame,n=na,status="alive")
+xd <- data.frame(frame,n=nd,status="dead")
+x <-  rbind(xa,xd)
+
+
+
+
+x$counter <- "ilastik"
+x <- x[,colnames(df)]
+
+
+df <- rbind(df,x)
+
+
+## the following code seems sketchy but currently is working because
+## the data frame is ordered regularly
+x <- data.frame(ilastik=df$n[df$counter=="ilastik"],
+                manual=df$n[df$counter=="manual"],
+                status=df$status[df$counter=="ilastik"])
+
+library(ggplot2)
+
+
+p1a <- ggplot(x,aes(x=manual,y=ilastik,color=status))+
+  geom_point()+
+  geom_abline()+
+  scale_color_discrete("")+
+  scale_x_continuous("manual cell counts")+
+  scale_y_continuous("Ilastik cell counts")+
+  theme_classic(base_size=12)
+p1a
+```
+```{r}
+
+
+load_counts <- function(fi){
+  
+  labs <- unlist(strsplit(fi,".csv"))[1]
+  labs <- unlist(strsplit(labs,"/"))[3]
+  
+  x <- read.csv(fi)
+  x$n <- 1
+  x <- x[,c("Frame","n")]
+  frame <- 1:34
+  n <- sapply(frame, function(fr) sum(x$Frame==fr))
+  df <- data.frame(frame,n)
+  df$status <- labs
+  df$counter <- "manual"
+  df
+}
+
+
+
+fi <- paste0("competition/mancounts/",list.files("competition/mancounts/"))
+df<- do.call(rbind,lapply(fi,load_counts))
+
+x <- read.csv("competition/ilastik_counts/set1_table.csv")
+
+x$status <- x$Predicted.Class
+x <- x[,c("timestep","status")]
+x$timestep <- 1+x$timestep
+x$n <-1
+frame <- 1:34
+
+
+n2 <- sapply(frame, function(fr) sum(x$timestep==fr&x$status=="2N"))
+n4 <- sapply(frame, function(fr) sum(x$timestep==fr&x$status=="4N"))
+nd <- sapply(frame, function(fr) sum(x$timestep==fr&x$status=="dead"))
+  
+x2 <- data.frame(frame,n=n2,status="2N")
+x4 <- data.frame(frame,n=n4,status="4N")
+xd <- data.frame(frame,n=nd,status="dead")
+x <-  rbind(x2,x4,xd)
+
+x$counter <- "ilastik"
+x <- x[,colnames(df)]
+
+
+df <- rbind(df,x)
+
+
+## the following code seems sketchy but currently is working because
+## the data frame is ordered regularly
+x <- data.frame(ilastik=df$n[df$counter=="ilastik"],
+                manual=df$n[df$counter=="manual"],
+                status=df$status[df$counter=="ilastik"])
+
+library(ggplot2)
+
+p1b <- ggplot(x,aes(x=manual,y=ilastik,color=status))+
+  geom_point()+
+  geom_abline()+
+  scale_color_discrete("")+
+  scale_x_continuous("manual cell counts")+
+  scale_y_continuous("Ilastik cell counts")+
+  theme_classic(base_size=12)
+p1b
+
+```
+```{r}
+
+f1 <- cowplot::plot_grid(p1a,p1b,nrow=1,labels=c("A","B"))
+ggsave("../../00_modelling_v2/figures/classifier_validation.png",width=6,height=2.5,units="in")
+```

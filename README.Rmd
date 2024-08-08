@@ -1,0 +1,1968 @@
+---
+title: "phosphate limits"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/glucose_wgd/")
+```
+
+```{r}
+library(ggplot2)
+source("Rscripts/utils.R")
+
+```
+
+We would like any regression to be valid at low fluourescence values. Unfortunately ours isn't because the residuals scale with the independent variable (heteroscedacity). 
+Heteroscedacity is when residuals have non-constant variance.
+Heteroscedacity violates assumptions of OLS regression.
+Data variability appears independent of glucose concentration when normalized by mean fluorescence intensity.
+
+```{r}
+G <- exp(seq(log(2e-06),log(1e-01),length.out=30))
+
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+xcalib <- x[x$day==0&!xcalib$G==0,]
+xcalib$G <- xcalib$G/xcalib$Dilution
+#xcalib <- x[x$Dilution==1,]
+
+p0 <- ggplot(xcalib,aes(x=G,y=value))+
+  geom_smooth(method="lm")+
+  geom_point(size=2)+
+  scale_x_continuous("glucose (mM)")+
+  scale_y_continuous("fluoresence")+
+  theme_bw(base_size=12)+
+  ggtitle("calibration assay")
+p0
+
+y <- aggregate(list(sd=xcalib$value),by=list(G=xcalib$G),sd)
+y$mean <- aggregate(list(mean=xcalib$value),by=list(G=xcalib$G),mean)$mean
+
+
+p1 <- ggplot(y,aes(x=G,y=sd))+
+  geom_point()+
+  scale_x_log10("glucose (mM)")+
+  scale_y_continuous("fluourescence s.d.")+
+  theme_bw(base_size=12)
+p1
+
+p2 <- ggplot(y,aes(x=G,y=sd/mean))+
+  geom_point()+
+  scale_x_log10("glucose (mM)")+
+  scale_y_continuous("normalized fluourescence s.d.")+
+  geom_hline(yintercept=mean(y$sd/y$mean),color="red")+
+  theme_bw(base_size=12)
+p2
+
+```
+
+Compare outcome of fitting multiplicative model v.s. linear.
+
+
+```{r}
+G <- exp(seq(log(2e-06),log(1e-01),length.out=30))
+
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+fit_lin <- function(pars,dat){
+  sqrt(mean(((dat$G*abs(pars[1])+abs(pars[2]))-(dat$value))^2))
+}
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+xcalib <- x[x$day==0&x$G>0,]
+xcalib$G <- xcalib$G/xcalib$Dilution
+
+p0 <- c(150000,20000)*1000
+
+opt_log <- optim(p0,fit_log,dat=xcalib)
+pars_log <- abs(opt_log$par)
+opt_lin <- optim(p0,fit_lin,dat=xcalib)
+pars_lin <- abs(opt_lin$par)
+
+dflin <- data.frame(G,value=G*pars_lin[1]+pars_lin[2])
+dflog <- data.frame(G,value=G*pars_log[1]+pars_log[2])
+
+plin <- ggplot(xcalib,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=dflin)+
+  scale_x_log10("glucose (mM)")+
+  scale_y_log10("fluoresence")+
+  theme_bw(base_size = 12)
+plin
+plog <- ggplot(xcalib,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=dflog)+
+  scale_x_log10("glucose (mM)")+
+  scale_y_log10("fluoresence")+
+  theme_bw(base_size = 12)
+plog
+
+p <- ggplot(x,aes(x=value))+
+  geom_histogram()+
+  scale_x_log10("fluorescence")+
+  coord_flip()+
+  theme_bw(base_size=12)
+p
+
+```
+
+
+
+Below shows that we can generated pdf's for glucose based on fluorescence, and that (for the most part), the supposedly plated glucose concentrations are reasonable.
+
+I wonder if we can test the hypothesis that there is a source of glucose in the dilution media?
+```{r}
+
+glu_prob <- function(glu,fluor,a,b,sdest){
+  Efluor <- a*glu + b
+  dnorm(log(fluor)-log(Efluor),sd=sdest)
+}
+
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+xcalib <- x[x$day==0&x$G>0,]
+xcalib$G <- xcalib$G/xcalib$Dilution
+
+p <- ggplot(xcalib,aes(x=G,y=value))+
+  geom_smooth(method="lm")+
+  geom_point(size=2)+
+  scale_x_continuous("glucose (mM)")+
+  scale_y_continuous("fluoresence")+
+  theme_bw(base_size=12)+
+  ggtitle("calibration assay")
+p
+
+p0 <- c(150000,20000)*1000
+
+opt <- optim(p0,fit_log,dat=xcalib)
+pars <- abs(opt$par)
+
+xcalib$pred_G <- (xcalib$value-abs(pars[2]))/abs(pars[1])
+xcalib$pred_F <- xcalib$G*abs(pars[1])+abs(pars[2])
+
+sdlog <- sd(log(xcalib$pred_F)-log(xcalib$value))
+
+glu_pars <- c(pars,sdlog)
+names(glu_pars) <- c("a","b","sd")
+saveRDS(glu_pars,"data/fitted_parameters/glu_pars.Rds")
+
+
+plot(xcalib$pred_F,log(xcalib$pred_F)-log(xcalib$value))
+
+epsilon <- log(xcalib$pred_F)-log(xcalib$value)
+sdest <- sd(epsilon)
+a <- pars[1]
+b <- pars[2]
+
+G <- exp(seq(-13,-2,by=0.1))
+df_fit <- data.frame(G,value = G*abs(pars[1])+abs(pars[2]))
+df_fit$Dilution <- 1
+
+
+
+p <- ggplot(xcalib,aes(x=value,y=G))+
+  geom_point()+
+  geom_line(data=df_fit)+
+  scale_x_log10()+
+  scale_y_log10()
+p
+
+
+df_prob <- do.call(rbind,lapply(1:nrow(xcalib),function(i){
+  value <- xcalib$value[i]
+  dilution <- xcalib$Dilution[i]
+  gplated <- xcalib$G[i]*dilution
+  p = sapply(G,glu_prob,fluor=value,a=a,b=b,sdest=sdest)
+  g_est <- G*dilution
+  z <- data.frame(p,g_est,id=i,gplated=gplated)
+}))
+
+
+
+p <- ggplot(df_prob[!df_prob$p<exp(-10),],aes(x=g_est,y=p,group=id))+
+  facet_wrap(~gplated,scales="free",nrow=4)+
+  geom_line()+
+  geom_vline(aes(xintercept=gplated),color="red")+
+  scale_y_continuous("probability density")+
+  scale_x_continuous("Glucose (mM)",breaks=scales::pretty_breaks())
+p
+
+x0 <- x[x$Dilution!=1&x$day==0,]
+
+z <- do.call(rbind,lapply(1:nrow(x0),function(i){
+  value <- x0$value[i]
+  dilution <- x0$Dilution[i]
+  gplated <- x0$G[i]
+  p = sapply(G,glu_prob,fluor=value,a=a,b=b,sdest=sdest)
+  g_est <- G*dilution
+  z <- data.frame(p,g_est,id=i,gplated=gplated)
+}))
+
+p <- ggplot(z[!z$p<exp(-10),],aes(x=g_est,y=p,group=id))+
+  facet_grid(cols=vars(gplated),scales="free")+
+  geom_line()+
+  geom_vline(aes(xintercept=gplated),color="red")
+p
+
+
+
+
+```
+
+Now we have a model for glucose we need to prepare the data in such a way that this can be easily utilized in the fitting. We also want a way to plot the glucose data. First to the plotting:
+
+```{r}
+
+xg <- read.csv("data/raw/221112_glucose_consumption.csv")
+gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
+xg <- xg[!xg$Dilution==1,]
+xtmp <- xg[xg$ploidy=="NaN",]
+xg$ploidy[xg$ploidy=="NaN"] <- "2N"
+xtmp$ploidy <- "4N"
+xg <- rbind(xtmp,xg)
+
+xg <- reshape2::melt(xg,id.vars=c("G","Dilution","day","ploidy"))
+xg <- aggregate(list(fluor=xg$value),
+                by=list(G=xg$G,day=xg$day,ploidy=xg$ploidy,
+                        Dilution=xg$Dilution),mean)
+colnames(xg)[1] <- "glucose"
+qvals <- data.frame(do.call(rbind,lapply(xg$fluor,function(fi){
+  (exp(log(fi)-qnorm(p=c(0.95,0.5,0.05),sd=gpar["sd"]))-gpar["b"])/gpar["a"]
+  
+})))
+qvals <- qvals*xg$Dilution
+
+colnames(qvals)<-c("Gmin","G","Gmax")
+xg <- cbind(xg,qvals)
+
+p <- ggplot(xg,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+p
+
+
+```
+
+```{r}
+
+proc_gluc_data <- function(xg){
+  xg <- xg[!xg$Dilution==1,]
+  xtmp <- xg[xg$ploidy=="NaN",]
+  xg$ploidy[xg$ploidy=="NaN"] <- "2N"
+  xtmp$ploidy <- "4N"
+  xg <- rbind(xtmp,xg)
+  xg <- reshape2::melt(xg,id.vars=c("G","Dilution","day","ploidy"))
+  xg
+}
+
+melt_cell_data <- function(x){
+  x$day <- (x$frame*8+8)/24
+  xtmp <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    mean)
+  xtmp$sd <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    sd)$ncells
+  xtmp
+}
+
+melt_g_data <- function(x){
+  aggregate(list(fluor=x$value),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            dilution = x$Dilution,
+                            glucose=x$G),
+                    mean)
+  
+}
+
+x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
+x <- rbind(x1,x2)
+x <- x[!x$glucose==0,]
+xg <- read.csv("data/raw/221112_glucose_consumption.csv")
+xg <- xg[!xg$G==0,]
+xg <- proc_gluc_data(xg)
+x <- melt_cell_data(x)
+xg <- melt_g_data(xg)
+
+y <- split(x,f=interaction(x$ploidy,x$glucose))
+y <- lapply(y,function(yi){
+  ploidy <- yi$ploidy[1]
+  glucose <- yi$glucose[1]
+  xgi <- xg[xg$ploidy==ploidy & xg$glucose==glucose,]
+  list(bx=yi,gx=xgi)
+})
+
+saveRDS(y,"data/fitting/fitting_data.Rds")
+```
+
+```{r}
+##OLD CHUNK
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+proc_gluc_data <- function(x){
+  
+  x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+
+  x0 <- x[x$Dilution==1&x$G>0,]
+  p0 <- c(150000,20000)*1000
+  pars <- abs(optim(p0,fit_log,dat=x0)$par)
+
+  xx <- x[x$Dilution>1,]
+  xtmp <- xx[xx$ploidy=="NaN",]
+  xx$ploidy[xx$ploidy=="NaN"]<-"2N"
+  xtmp$ploidy <- "4N"
+  xx <- rbind(xx,xtmp)
+  xx$glucose <- (xx$value-pars[2])*xx$Dilution/pars[1]
+
+  y <- data.frame(G=c(0.001,0.002,seq(0.01,50,0.01)))/1000
+  y$value <- (pars[1]*y$G+pars[2])
+
+  xxx <- xx[,c("G","day","ploidy","glucose")]
+  xxx <- xxx[!is.na(xxx$ploidy),]
+}
+
+melt_cell_data <- function(x){
+  x$day <- (x$frame*8+8)/24
+  xtmp <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    mean)
+  xtmp$sd <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    sd)$ncells
+  xtmp
+}
+
+melt_g_data <- function(x){
+  xg0 <- x[x$day==0,]
+  xg0$dg <- abs(xg0$G-xg0$glucose)
+  names(xg0)[1] <- "glucose"
+  fit <- lm(dg~glucose,data=xg0)
+  xtmp <- aggregate(list(G=x$glucose),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            glucose=x$G),
+                    mean)
+  xtmp$sd <- aggregate(list(G=x$glucose),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            glucose=x$G),
+                    sd)$G
+  sd_pred <- predict(fit,xtmp)
+  xtmp$sd <- sqrt(xtmp$sd^2+sd_pred^2)
+  
+  xtmp
+}
+
+x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
+x <- rbind(x1,x2)
+xg <- proc_gluc_data(read.csv("data/raw/221112_glucose_consumption.csv"))
+x <- melt_cell_data(x)
+xg <- melt_g_data(xg)
+
+y <- split(x,f=interaction(x$ploidy,x$glucose))
+y <- lapply(y,function(yi){
+  ploidy <- yi$ploidy[1]
+  glucose <- yi$glucose[1]
+  xgi <- xg[xg$ploidy==ploidy & xg$glucose==glucose,]
+  list(bx=yi,gx=xgi)
+})
+
+saveRDS(y,"data/fitting/fitting_data.Rds")
+```
+
+Previously, we fit various models to the PROBE glucose data. These fits can be run as follows:
+
+```{r}
+
+wrap_run_old_model <- function(model,gluconc){
+  source(paste0("Rscripts/models/",model,".R"))
+  par2N <- readRDS(paste0("data/prior_pars/",model,"/rev0/2N.Rds"))$par
+  par4N <- readRDS(paste0("data/prior_pars/",model,"/rev0/4N.Rds"))$par
+  if(model%in%c("modelA","modelA3")){
+      par2N <- readRDS(paste0("data/prior_pars/",model,"/rev0/2N.Rds"))$res
+      par2N <- par2N[which(par2N[,"value"]==min(par2N[,"value"])),1:(ncol(par2N)-4)]
+      par4N <- readRDS(paste0("data/prior_pars/",model,"/rev0/4N.Rds"))$res
+      par4N <- par4N[which(par4N[,"value"]==min(par4N[,"value"])),1:(ncol(par4N)-4)]
+  }
+  x2n <- run_old_model(as.numeric(par2N),names(par2N),gluconc=gluconc,ploidy = "2N" )
+  x4n <- run_old_model(as.numeric(par4N),names(par4N),gluconc=gluconc,ploidy = "4N" )
+  list(bx=rbind(x2n$bx,x4n$bx),gx=rbind(x2n$gx,x4n$gx))
+
+  ####################################
+  # TO GET THE LL SCORE, AS FOLLOWS::
+  #parnames <- names(par2N)
+  #par <- as.numeric(par2N)
+  #names(par) <- parnames
+  #info <- model_info()  
+  #fit_dat <- load_dat_old()
+  #fit_full_model(par,dat=fit_dat$bx,parNames=info$parnames,ploidy="2N",glu_dat=fit_dat$gx1, theta_hat=NULL)
+  ####################################
+}
+
+models <- c("model0","modelA","modelB","modelA3")
+
+model <- models[4]
+new_dat <- readRDS("data/fitting/fitting_data.Rds")
+new_dat <- melt_data_for_plotting(new_dat)
+gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
+new_dat$gx <- transform_fluor_for_plotting(new_dat$gx,gpar)
+gluconc <- unique(new_dat$bx$glucose)
+
+
+df <- wrap_run_old_model(model,gluconc=gluconc)
+
+pb <- ggplot(new_dat$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=df$bx)
+pb
+
+pg <- ggplot(new_dat$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df$gx)+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+pg
+```
+
+```{r}
+
+refit_model <- function(model,ploidy,new_dat,gpar){
+gluconc <- unique(new_dat$bx$glucose)
+
+source(paste0("Rscripts/models/",model,".R"))
+X <- readRDS(paste0("data/prior_pars/",model,"/rev0/",ploidy,".Rds"))$par
+if(model%in%c("modelA","modelA3")){
+      X <- readRDS(paste0("data/prior_pars/",model,"/rev0/2N.Rds"))$res
+      X <- X[which(X[,"value"]==min(X[,"value"])),1:(ncol(X)-4)]
+}
+X["delta_G"] <- -2
+parNames <- names(X)
+
+par <- as.numeric(X)
+
+fit_full_model(par,dat=new_dat$bx,parNames=parNames,ploidy=ploidy,glu_dat=new_dat$gx, theta_hat=NULL,gpar=gpar)
+
+opt <- optim(par,fn = fit_full_model,dat=new_dat$bx,parNames=parNames,ploidy=ploidy,glu_dat=new_dat$gx,gpar=gpar)
+fit_full_model(opt$par,dat=new_dat$bx,parNames=info$parnames,ploidy=ploidy,glu_dat=new_dat$gx, theta_hat=NULL,gpar=gpar)
+
+X <- opt$par
+names(X) <- parNames
+
+df <- run_old_model(as.numeric(X),names(X),gluconc=gluconc,ploidy = ploidy)
+df$par <- X
+df$curves <- plot_curves(X,ploidy)
+df
+}
+
+model <- "modelA3"
+
+new_dat <- readRDS("data/fitting/fitting_data.Rds")
+new_dat <- melt_data_for_plotting(new_dat)
+gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
+
+df2 <- refit_model(model,"2N",new_dat,gpar=gpar)
+df4 <- refit_model(model,"4N",new_dat,gpar=gpar)
+df <- list(bx=rbind(df2$bx,df4$bx),gx=rbind(df2$gx,df4$gx),
+           curves=rbind(df2$curves,df4$curves))
+new_dat$gx <- transform_fluor_for_plotting(new_dat$gx,gpar)
+pb <- ggplot(new_dat$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=df$bx)
+pb
+
+pg <- ggplot(new_dat$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df$gx)+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+pg
+
+pc <- ggplot(df$curves,aes(x=G,y=value,color=ploidy))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line()+
+  scale_x_log10()
+pc
+```
+
+Confirm we can reproduce the logL value:
+```{r}
+best <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+b <- best[[5]]
+par <- b$par
+val <- b$ll
+
+source("Rscripts/models/modelB.R")
+fit_dat <- load_dat()
+info <- model_info()
+parnames <- names(par)
+par <- as.numeric(par)
+names(par) <- parnames
+fit_full_model(par,dat=fit_dat$bx,parNames=info$parnames,ploidy="4N",glu_dat=fit_dat$gx1, theta_hat=NULL)
+```
+
+
+Overview of experimental data. 
+
+```{r}
+
+x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x1$exp <- "220823"
+x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
+x2$exp <- "221112"
+x <- rbind(x1,x2)
+p <- ggplot(x,aes(x=frame,y=ncells,color=label,shape=exp))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()
+p
+
+p <- ggplot(x[x$glucose%in%c(0.1,0.5,1),],aes(x=frame,y=ncells,color=label,shape=exp))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()
+p
+y <- x[x$frame==0&x$label=="alive",]
+
+p <- ggplot(y,aes(x=ncells,fill=exp))+
+  facet_grid(rows=vars(ploidy))+
+  geom_density()
+p
+
+```
+
+
+Building datasets for fitting:
+
+```{r}
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+proc_gluc_data <- function(x){
+  
+  x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+
+  x0 <- x[x$Dilution==1&x$G>0,]
+  p0 <- c(150000,20000)*1000
+  pars <- abs(optim(p0,fit_log,dat=x0)$par)
+
+  xx <- x[x$Dilution>1,]
+  xtmp <- xx[xx$ploidy=="NaN",]
+  xx$ploidy[xx$ploidy=="NaN"]<-"2N"
+  xtmp$ploidy <- "4N"
+  xx <- rbind(xx,xtmp)
+  xx$glucose <- (xx$value-pars[2])*xx$Dilution/pars[1]
+
+  y <- data.frame(G=c(0.001,0.002,seq(0.01,50,0.01)))/1000
+  y$value <- (pars[1]*y$G+pars[2])
+
+  xxx <- xx[,c("G","day","ploidy","glucose")]
+  xxx <- xxx[!is.na(xxx$ploidy),]
+}
+
+melt_cell_data <- function(x){
+  x$day <- (x$frame*8+8)/24
+  xtmp <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    mean)
+  xtmp$sd <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    sd)$ncells
+  xtmp
+}
+
+melt_g_data <- function(x){
+  xg0 <- x[x$day==0,]
+  xg0$dg <- abs(xg0$G-xg0$glucose)
+  names(xg0)[1] <- "glucose"
+  fit <- lm(dg~glucose,data=xg0)
+  xtmp <- aggregate(list(G=x$glucose),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            glucose=x$G),
+                    mean)
+  xtmp$sd <- aggregate(list(G=x$glucose),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            glucose=x$G),
+                    sd)$G
+  sd_pred <- predict(fit,xtmp)
+  xtmp$sd <- sqrt(xtmp$sd^2+sd_pred^2)
+  
+  xtmp
+}
+
+x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
+xg <- proc_gluc_data(read.csv("data/raw/221112_glucose_consumption.csv"))
+x1 <- melt_cell_data(x1)
+x2 <- melt_cell_data(x2)
+xg <- melt_g_data(xg)
+
+y1 <- split(x1,f=interaction(x1$ploidy,x1$glucose))
+y1 <- lapply(y1, function(yi) list(bx=yi,gx=NULL))
+
+y2 <- split(x2,f=interaction(x2$ploidy,x2$glucose))
+y2 <- lapply(y2,function(yi){
+  ploidy <- yi$ploidy[1]
+  glucose <- yi$glucose[1]
+  xgi <- xg[xg$ploidy==ploidy & xg$glucose==glucose,]
+  list(bx=yi,gx=xgi)
+})
+
+y <- c(y1,y2)
+saveRDS(y,"data/fitting/fitting_data.Rds")
+```
+
+```{r}
+
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+#x$value <- x$value*x$Dilution
+x0 <- x[x$Dilution==1&x$G>0,]
+
+p0 <- c(150000,20000)*1000
+pars <- abs(optim(p0,fit_log,dat=x0)$par)
+
+xx <- x[x$Dilution>1,]
+xtmp <- xx[xx$ploidy=="NaN",]
+xx$ploidy[xx$ploidy=="NaN"]<-"2N"
+xtmp$ploidy <- "4N"
+xx <- rbind(xx,xtmp)
+xx$glucose <- (xx$value-pars[2])*xx$Dilution/pars[1]
+
+y <- data.frame(G=c(0.001,0.002,seq(0.01,50,0.01)))/1000
+y$value <- (pars[1]*y$G+pars[2])
+
+xxx <- xx[,c("G","day","ploidy","glucose")]
+
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)
+p
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)+
+  scale_x_log10()+
+  scale_y_log10()
+p
+
+p <- ggplot(x,aes(x=value))+
+  geom_histogram(bins=10)+
+  scale_x_log10()
+p
+
+
+p <- ggplot(xx[!xx$ploidy=="NaN",],aes(x=day,y=glucose))+
+  facet_grid(cols=vars(ploidy),rows=vars(G),scales="free")+
+  geom_point()+
+  scale_y_continuous()+
+  geom_hline(yintercept = 0)+
+  geom_hline(aes(yintercept=G))
+p
+
+```
+
+```{r}
+xg <- proc_gluc_data(read.csv("data/raw/221112_glucose_consumption.csv"))
+xg <- xg[xg$day==0,]
+dg <- abs(xg$G-xg$glucose)
+
+p <- ggplot(xg,aes(x=glucose,y=dg))+
+  geom_point()+
+  geom_smooth(method="lm")
+p
+
+```
+
+Some steps here to generate the initial pars are in model_building.Rmd. Need to revise that code to work with the updated dataset formatting above, then include here. 
+
+```{r,eval=F}
+source("Rscripts/optimisation/fit_full.R")
+
+```
+
+Repeat the below with the finalized parameter versions
+```{r}
+library(deSolve)
+mod <- function(Time, State, Pars){
+  with(as.list(c(State, Pars)), {
+   # if (Time > delay) {
+   #   G_delayed <- lagvalue(Time - delay, 3)
+   # } else {
+    #  G_delayed <- 25  # If the time is less than the delay, use the initial value
+    #}
+    dN <- ka*N/(1+(g50a/G)^na)-kd*N*(1-1/(1+(g50d/G)^nd))
+    dD <- kd*N*(1-1/(1+(g50d/G)^nd))
+    dG <- -kg*N*G^ng/(G^ng+g50c^ng)
+    return(list(c(dN,dD,dG)))
+  })
+}
+
+mod <- function(Time, State, Pars){
+  with(as.list(c(State, Pars)), {
+    #if (Time > delay) {
+    # G_delayed <- lagvalue(Time - delay, 3)
+    #} else {
+    # G_delayed <- 25  # If the time is less than the delay, use the initial value
+    #}
+    dN <- ka*N/(1+(g50a/G)^na)-kd*N*(1-1/(1+(g50d/G)^nd))
+    dD <- kd*N*(1-1/(1+(g50d/G)^nd))
+    dG <- -N*(kgr*(1/(1+(g50a/G)^na))+kgd*(1/(1+g50d/G)^nd))
+    return(list(c(dN,dD,dG)))
+  })
+}
+
+run_mod <- function(pars,y0){
+  times <- seq(0,7,1/30)
+  ode(y0,times,mod,pars)
+}
+
+mod_err <- function(pars,varpars,yi){
+  pars <- exp(pars)
+  y0 <- c(N=varpars[1],D=0,G=varpars[2])
+  
+  out <- run_mod(pars,y0)
+  
+  N <- out[out[,"time"]%in%yi$bx$day,"N"]
+  D <- out[out[,"time"]%in%yi$bx$day,"D"]
+  
+  obs <- c(yi$bx$ncells[yi$bx$metric=="alive"],
+           yi$bx$ncells[yi$bx$metric=="dead"])
+  sd_obs <- c(yi$bx$sd[yi$bx$metric=="alive"],
+              yi$bx$sd[yi$bx$metric=="dead"])
+  pred <- c(N,D)
+  if(!is.null(yi$gx)){
+    G <- out[out[,"time"]%in%yi$gx$day,"G"]
+    obs <- c(obs,yi$gx$G)
+    sd_obs <- c(sd_obs,yi$gx$sd)
+    pred <- c(pred,G)
+  }
+  pred[is.na(pred)] <- 10^5
+  sum((pred-obs)^2/sd_obs^2)
+}
+
+wrap_fit_varpars <- function(varpars,pars,yi){
+  mod_err(pars,varpars,yi)
+}
+
+##FUNCTIONS ABOVE ARE COMMON WITH FIT FULL, THEY SHOULD BE REMOVED FROM HERE AND THAT SCRIPT, AND PLACED IN A SHARED FILE
+
+wrap_run_mod <- function(pars,yxn){
+  pars <- exp(pars)
+  N0 <- pars[grepl("inicell",names(pars))]
+  G0 <- pars[grepl("iniglu",names(pars))]
+  
+  pars <- pars[!grepl("inicell",names(pars))]
+  pars <- pars[!grepl("initglu",names(pars))]
+  lapply(1:length(yxn),function(i){
+    yi <- yxn[[i]]
+    varpars <- as.numeric(c(N0[i],G0[i]))
+    #opt_varpars <- optim(varpars,fn = wrap_fit_varpars,pars=pars,yi=yi)
+    #varpars <- opt_varpars$par
+    y0 <- c(N=varpars[1],D=0,G=varpars[2])
+    out <- run_mod(pars,y0)
+    colnames(out) <- c("day","alive","dead","G")
+    gx <- data.frame(out[,c("day","G")])
+    bx <- data.frame(out[,c("day","alive","dead")])
+    bx <- reshape2::melt(bx,id.vars="day")
+    colnames(bx)[2:3] <-c("metric","ncells")
+    glucose <- yi$bx$glucose[1]
+    ploidy <- yi$bx$ploidy[1]
+    gx$glucose <- glucose
+    gx$ploidy <- ploidy
+    bx$glucose <- glucose
+    bx$ploidy <- ploidy
+    list(gx=gx,bx=bx)
+  })
+}
+get_best <- function(parlist){
+  errs <- sapply(parlist,function(pp) {
+    pp$value
+  })
+  parlist[[min(errs)]]$par
+}
+
+wrap_fits <- function(ploidy){
+  y <- readRDS("data/fitting/fitting_data.Rds")
+y2n <- y[grepl(ploidy,names(y))]
+y2n <- y2n[sapply(y2n,function(yi) !is.null(yi$gx))]
+#pars <- readRDS("data/fitted_parameters/init_4N.Rds")
+parlist <- readRDS(paste0("data/fitted_parameters/multistart_modB_",ploidy,".Rds"))
+errs <- sapply(parlist,function(pp) pp$value)
+pars <- parlist[[which(errs==min(errs))]]$par#readRDS(paste0("data/fitted_parameters/final_",ploidy,"_delay.Rds"))
+#pars <- exp(pars$par)
+#pars <- log(abs(pars))
+x <- wrap_run_mod(pars,yxn=y2n)
+id <- sapply(y2n,function(yi) is.null(yi$gx))
+
+dfx1_n <- do.call(rbind,lapply(x[id],function(yi){
+  yi$bx
+}))
+dfy1_n <- do.call(rbind,lapply(y2n[id],function(yi){
+  yi$bx
+}))
+
+dfx2_n <- do.call(rbind,lapply(x[!id],function(yi){
+  yi$bx
+}))
+dfy2_n <- do.call(rbind,lapply(y2n[!id],function(yi){
+  yi$bx
+}))
+
+dfx2_g <- do.call(rbind,lapply(x[!id],function(yi){
+  yi$gx
+}))
+dfy2_g <- do.call(rbind,lapply(y2n[!id],function(yi){
+  yi$gx
+}))
+
+
+list(dfy1_n=dfy1_n,dfx1_n=dfx1_n,
+     dfy2_n=dfy2_n,dfx2_n=dfx2_n,
+     dfy2_g=dfy2_g,dfx2_g=dfx2_g)
+
+}
+
+f2N <- wrap_fits("2N")
+f4N <- wrap_fits("4N")
+
+dfy1_n <- rbind(f4N$dfy1_n,f2N$dfy1_n)
+dfx1_n <- rbind(f4N$dfx1_n,f2N$dfx1_n)
+
+pn1 <- ggplot(dfy1_n,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=dfx1_n)
+pn1
+
+dfy2_n <- rbind(f4N$dfy2_n,f2N$dfy2_n)
+dfx2_n <- rbind(f4N$dfx2_n,f2N$dfx2_n)
+
+pn2 <- ggplot(dfy2_n,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=dfx2_n)
+pn2
+
+dfy2_g <- rbind(f4N$dfy2_g,f2N$dfy2_g)
+dfx2_g <- rbind(f4N$dfx2_g,f2N$dfx2_g)
+
+pg <- ggplot(dfy2_g,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=G-sd,ymax=G+sd))+
+  geom_line(data=dfx2_g)
+pg
+
+
+```
+
+```{r}
+
+get_best <- function(parlist){
+  errs <- sapply(parlist,function(pp) {
+    pp$value
+  })
+  parlist[[which(errs==min(errs))]]$par
+}
+
+plot_curves <- function(pars,ploidy){
+  with(as.list(pars),{
+    G <- seq(0.001,1,0.001)
+    data.frame(G,ploidy,
+               div=ka/(1+(g50a/G)^na),
+               death=kd*(1-1/(1+(g50d/G)^nd)),
+               cons=kgr*(1/(1+(g50a/G)^na))+kgd*(1/(1+g50d/G)^nd))
+  })  
+}
+
+par2N <- exp(get_best(readRDS(paste0("data/fitted_parameters/multistart_modB_2N.Rds"))))
+par4N <- exp(get_best(readRDS(paste0("data/fitted_parameters/multistart_modB_4N.Rds"))))
+
+df <- rbind(plot_curves(par2N,"2N"),plot_curves(par4N,"4N"))
+df <- reshape2::melt(df,id.vars=c("G","ploidy"))
+p <- ggplot(df,aes(x=G,y=value,color=ploidy))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line()+
+  scale_x_log10()
+p
+```
+
+```{r}
+get_best <- function(parlist){
+  errs <- sapply(parlist,function(pp) {
+    pp$value
+  })
+  parlist[[which(errs==min(errs))]]$par
+}
+mod <- function(Time, State, Pars){
+  with(as.list(c(State, Pars)), {
+    #if (Time > delay) {
+    # G_delayed <- lagvalue(Time - delay, 3)
+    #} else {
+    # G_delayed <- 25  # If the time is less than the delay, use the initial value
+    #}
+    dN <- ka*N/(1+(g50a/G)^na)-kd*N*(1-1/(1+(g50d/G)^nd))
+    dD <- kd*N*(1-1/(1+(g50d/G)^nd))
+    dG <- -N*(kgr*(1/(1+(g50a/G)^na))+kgd*(1/(1+g50d/G)^nd))
+    return(list(c(dN,dD,dG)))
+  })
+}
+
+run_mod <- function(pars,y0){
+  times <- seq(0,7,1/30)
+  ode(y0,times,mod,pars)
+  #dede(y0,times,mod,pars)
+}
+
+mod_err <- function(pars,varpars,yi){
+  pars <- exp(pars)
+  y0 <- c(N=varpars[1],D=0,G=varpars[2])
+  
+  out <- run_mod(pars,y0)
+  
+  N <- out[out[,"time"]%in%yi$bx$day,"N"]
+  D <- out[out[,"time"]%in%yi$bx$day,"D"]
+  
+  obs <- c(yi$bx$ncells[yi$bx$metric=="alive"],
+           yi$bx$ncells[yi$bx$metric=="dead"])
+  sd_obs <- c(yi$bx$sd[yi$bx$metric=="alive"],
+              yi$bx$sd[yi$bx$metric=="dead"])
+  pred <- c(N,D)
+  if(!is.null(yi$gx)){
+    G <- out[out[,"time"]%in%yi$gx$day,"G"]
+    obs <- c(obs,yi$gx$G)
+    sd_obs <- c(sd_obs,yi$gx$sd)
+    pred <- c(pred,G)
+  }
+  pred[is.na(pred)] <- 10^5
+  sum((pred-obs)^2/sd_obs^2)
+}
+
+wrap_fit_varpars <- function(varpars,pars,yi){
+  mod_err(pars,varpars,yi)
+}
+
+wrap_fit_mod <- function(pars,yxn){
+
+  N0 <- exp(pars[grepl("inicell",names(pars))])
+  G0 <- exp(pars[grepl("iniglu",names(pars))])
+  
+  pars <- pars[!grepl("inicell",names(pars))]
+  pars <- pars[!grepl("iniglu",names(pars))]
+  
+  errs <- sapply(1:length(yxn),function(i){
+    yi <- yxn[[i]]
+    #N0 <- yi$bx$ncells[yi$bx$day==min(yi$bx$day)&yi$bx$metric=="alive"]
+    varpars <- as.numeric(c(N0[i],G0[i]))
+    tryCatch({
+      mod_err(pars,varpars,yi)},
+      error=function(e) return(10^10))
+  })
+  print(errs)
+  print(sum(errs))
+  return(sum(errs))
+}
+
+ll_wrapper <- function(iniglu_2N.0, iniglu_2N.0.1, iniglu_2N.0.25, iniglu_2N.0.5, iniglu_2N.1,
+                       inicell_2N.0, inicell_2N.0.1, inicell_2N.0.25, inicell_2N.0.5, inicell_2N.1,
+                       kgr, kgd, kd, g50d, nd, ka, g50a, na) {
+   pars <- c(iniglu_2N.0 = iniglu_2N.0, iniglu_2N.0.1 = iniglu_2N.0.1, iniglu_2N.0.25 = iniglu_2N.0.25,
+            iniglu_2N.0.5 = iniglu_2N.0.5, iniglu_2N.1 = iniglu_2N.1, inicell_2N.0 = inicell_2N.0,
+            inicell_2N.0.1 = inicell_2N.0.1, inicell_2N.0.25 = inicell_2N.0.25, inicell_2N.0.5 = inicell_2N.0.5,
+            inicell_2N.1 = inicell_2N.1, kgr = kgr, kgd = kgd, kd = kd, g50d = g50d, nd = nd,
+            ka = ka, g50a = g50a, na = na)
+  -wrap_fit_mod(pars,yxn)
+}
+
+y <- readRDS("data/fitting/fitting_data.Rds")
+pars<-get_best(readRDS(paste0("data/fitted_parameters/multistart_modB_2N.Rds")))
+yxn <- y[grepl("2N",names(y))]
+yxn <- yxn[sapply(yxn,function(yi) !is.null(yi$gx))]
+
+opt=mle2(ll_wrapper,start = as.list(pars))
+
+```
+
+```{r}
+ll <- function(pars){
+  sum((pars[1]*sin((0:10)*pars[2])-data)^2)
+}
+data <- 2*sin(0:10)+rnorm(11)
+
+
+mle2(ll)
+iniglu_2N.0 <- 3
+```
+
+```{r}
+
+gsen <- function(pars){
+  with(as.list(pars), {
+    G <- seq(0.001,1,0.001)
+    death <- kd*(1-1/(1+(g50d/G)^nd))
+    birth <- ka/(1+(g50a/G)^na)
+    df <- data.frame(G,death,birth)
+    df <- reshape2::melt(df,id.vars="G")
+    return(df)
+  })
+}
+
+
+pars2N <- exp(readRDS("data/fitted_parameters/final_2N_delay.Rds")$par)
+pars4N <- exp(readRDS("data/fitted_parameters/final_4N_delay.Rds")$par)
+
+df <- rbind(cbind(gsen(pars2N),ploidy="2N"),
+            cbind(gsen(pars4N),ploidy="4N"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy))+
+  facet_grid(rows=vars(variable))+
+  geom_line()+scale_x_log10()
+p
+
+```
+
+
+
+
+```{r}
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+#x$value <- x$value*x$Dilution
+x0 <- x[x$Dilution==1&x$G>0,]
+
+p0 <- c(150000,20000)*1000
+pars <- abs(optim(p0,fit_log,dat=x0)$par)
+
+xx <- x[x$Dilution>1,]
+xtmp <- xx[xx$ploidy=="NaN",]
+xx$ploidy[xx$ploidy=="NaN"]<-"2N"
+xtmp$ploidy <- "4N"
+xx <- rbind(xx,xtmp)
+xx$glucose <- (xx$value-pars[2])*xx$Dilution/pars[1]
+
+y <- data.frame(G=c(0.001,0.002,seq(0.01,50,0.01)))/1000
+y$value <- (pars[1]*y$G+pars[2])
+
+xxx <- xx[,c("G","day","ploidy","glucose")]
+#saveRDS(xxx,file="05_updated_glucose.Rds")
+
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)
+p
+
+p <- ggplot(x0,aes(x=G,y=value))+
+  geom_point()+
+  geom_line(data=y)+
+  scale_x_log10()+
+  scale_y_log10()
+p
+
+p <- ggplot(x,aes(x=value))+
+  geom_histogram(bins=10)+
+  scale_x_log10()
+p
+
+p <- ggplot(xxx,aes(x=day,y=glucose))+
+  facet_grid(cols=vars(ploidy),rows=vars(G),scales="free")+
+  geom_point()
+p
+
+
+gx <- aggregate(list(G=xxx$glucose),by=list(day=xxx$day,ploidy=xxx$ploidy,glucose=xxx$G),mean)
+gxsd <- aggregate(list(sd=xxx$glucose),by=list(day=xxx$day,ploidy=xxx$ploidy,glucose=xxx$G),sd)
+gx$sd <- gxsd$sd
+
+saveRDS(gx,"data/processed/221112_glucose.Rds")
+
+```
+
+
+```{r}
+x <- readRDS("processed/ilastik_counts.Rds")
+x$day <- (x$frame*8+8)/24
+bx <- aggregate(list(ncells=x$ncells),by=list(day=x$day,frame=x$frame,ploidy=x$ploidy,glucose=x$glucose,
+                                              metric=x$label),mean)
+bx$sd <- aggregate(list(ncells=x$ncells),by=list(day=x$day,frame=x$frame,ploidy=x$ploidy,glucose=x$glucose,
+                                                 metric=x$label),sd)$ncells
+
+
+saveRDS(bx,"processed/fitting_datasets/cellcount_data.Rds")
+
+p <- ggplot(bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))
+p
+
+```
+
+```{r}
+
+eval_best <- function(px,gluconc){
+  model <- px$model
+  ploidy <- px$ploidy
+  par <- unlist(px$par)
+  
+  source(paste0("../Rscripts/models/",model,".R"))
+  
+  df <- run_full_model(par,names(par),gluconc = gluconc)
+  df$day <- df$time/24
+  df <- df[,c("day","N","D","G","glucose")]
+  df$model <- model
+  df$ploidy <- ploidy
+  df
+  
+}
+
+x <- readRDS("../opt_out/modelA3/000.Rds")
+x <- x$res
+x <- data.frame(x)
+x <- x[order(x$value),]
+pars <- x[1,1:(ncol(x)-4)]
+
+best <- list(pars=pars,ploidy="2N",model="modelA3")
+d <- load_dat()
+gluconc <- unique(d$bx$glucose)
+
+df <- eval_best(best,gluconc=gluconc)
+
+df <- reshape2::melt(df,id.vars=c("day","glucose","model","ploidy"))
+colnames(df)[colnames(df)=="variable"] <- "metric"
+df$metric <- c(N="alive",D="dead",G="G")[df$metric]
+
+renamr <- function(gg){paste0("G0=",gg,"mM")}
+
+d$bx$gg <- sapply(d$bx$glucose,renamr)
+df$gg <- sapply(df$glucose,renamr)
+
+d$bx$gfac <- factor(d$bx$gg,levels=unique(d$bx$gg))
+df$gfac <- factor(df$gg,levels=unique(df$gg))
+
+pn <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=interaction(metric,model)),size=1)+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2)+
+  scale_color_discrete("")+
+  scale_x_continuous("days")+
+  scale_y_continuous("number of cells")+
+  theme_classic(base_size = 16)+
+  theme(legend.position = "top")
+pn
+
+d$gx$gg <- sapply(d$gx$glucose,renamr)
+
+d$gx$gfac <- factor(d$gx$gg,levels=unique(d$gx$gg))
+
+pg <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  #geom_line(data=df[df$metric=="G",],aes(y=as.numeric(value),group=interaction(metric,model)))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)
+pg
+
+```
+
+```{r}
+
+
+
+d <- load_dat()
+gluconc <- unique(d$bx$glucose)
+rev <- "rev0"
+model <- "modelB"
+best <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+best <- best[sapply(best,function(bi) bi$model)==model]
+df <- do.call(rbind,lapply(best,eval_best,gluconc=gluconc))
+
+df <- reshape2::melt(df,id.vars=c("day","glucose","model","ploidy"))
+colnames(df)[colnames(df)=="variable"] <- "metric"
+df$metric <- c(N="alive",D="dead",G="G")[df$metric]
+
+renamr <- function(gg){paste0("G0=",gg,"mM")}
+
+d$bx$gg <- sapply(d$bx$glucose,renamr)
+df$gg <- sapply(df$glucose,renamr)
+
+d$bx$gfac <- factor(d$bx$gg,levels=unique(d$bx$gg))
+df$gfac <- factor(df$gg,levels=unique(df$gg))
+
+pn <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=interaction(metric,model)),size=1)+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2)+
+  scale_color_discrete("")+
+  scale_x_continuous("days")+
+  scale_y_continuous("number of cells")+
+  theme_classic(base_size = 16)+
+  theme(legend.position = "top")
+pn
+
+d$gx$gg <- sapply(d$gx$glucose,renamr)
+
+d$gx$gfac <- factor(d$gx$gg,levels=unique(d$gx$gg))
+
+pg <- ggplot(d$gx,aes(x=day,y=G))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric=="G",],aes(y=as.numeric(value),group=interaction(metric,model)))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)+
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0.5, fill = "blue", alpha = .1, color = NA)
+pg
+
+
+```
+
+```{r}
+pars <- c(1.074798e+01, -3.677250e+00, -4.116544e+00, -5.154887e+00, -1.935550e+00,
+-4.450470e+00,  2.291679e+00,  8.574971e-02, -1.097937e+01, -1.131858e+01,
+ 5.939369e+00,  1.467220e+00)
+names(pars)<- c("theta","kp","kd","kd2","g50a","g50d","na","nd","v1"  ,"v2" ,"N" ,"D")
+
+res <- list(par=pars,ll=10000,ploidy="2N",model="modelB")
+
+eval_best <- function(px){
+  model <- px$model
+  ploidy <- px$ploidy
+  par <- unlist(px$par)
+  
+  source(paste0("../Rscripts/models/",model,".R"))
+  
+  df <- run_full_model(par,names(par),gluconc=c(0,0.1,0.25,.5,1))
+  df$day <- df$time/24
+  df <- df[,c("day","N","D","G","glucose")]
+  df$model <- model
+  df$ploidy <- ploidy
+  df
+  
+}
+
+x <- eval_best(res)
+x <- reshape2::melt(x,measure.vars=c("N","D","G"))
+
+pn <- ggplot(x,aes(x=day,y=value))+
+  facet_grid(rows=vars(variable),cols=vars(glucose),scales="free")+
+  geom_line(size=1)
+pn
+```
+
+
+estimate first deriv:
+
+```{r}
+
+get_g <- function(xx){
+  xx <- split(xx,f=xx$glucose)
+  xx <- do.call(rbind,lapply(xx,function(xi){
+    dn <- diff(xi$ncells)
+    dn <- c(NaN,zoo::rollmean(dn,k=2),NaN)
+    xi$dn <- dn/diff(xi$day)[1]
+    xi <- xi[xi$day%in%c(1,2,3),]
+    
+    gd <- xxx[xxx$ploidy==xi$ploidy[1]&xxx$G==xi$glucose[1]&xxx$day%in%c(1,2,3),]
+    gd <- aggregate(list(g=gd$glucose),by=list(day=gd$day),mean)
+    
+    xi <- merge(xi,gd,by="day")
+    
+  }))
+  xx
+}
+
+x <- readRDS("processed/ilastik_counts.Rds")
+xxx <- readRDS("processed/glucose.Rds")
+
+x <- aggregate(list(ncells=x$ncells),by=list(label=x$label,frame=x$frame,
+                                             ploidy=x$ploidy,glucose=x$glucose),
+               mean)
+x$day <- (x$frame*8+8)/24
+xa2 <- get_g(x[x$label=="alive" & x$ploidy=="2N",])
+xa4 <- get_g(x[x$label=="alive" & x$ploidy=="4N",])
+xd2 <- get_g(x[x$label=="dead" & x$ploidy=="2N",])
+xd4 <- get_g(x[x$label=="dead" & x$ploidy=="4N",])
+
+if(mean(xa2$g!=xd2$g)) stop("out of expected order!")
+if(mean(xa4$g!=xd4$g)) stop("out of expected order!")
+
+x2 <- xa2
+x2$dd <- xd2$dn/x2$ncells
+x2$da <- (xd2$dn+xa2$dn)/x2$ncells
+
+x4 <- xa4
+x4$dd <- xd4$dn/x4$ncells
+x4$da <- (xd4$dn+xa4$dn)/x4$ncells
+
+x <- rbind(x2,x4)
+
+x <- reshape2::melt(x,measure.vars=c("dd","da"))
+p <- ggplot(x,aes(x=g,y=value,color=variable))+
+  facet_grid(cols=vars(ploidy))+
+  geom_point()+
+  scale_x_log10()
+p
+
+saveRDS(x,file="processed/glucose_vs_dcellsdt.Rds")
+
+```
+
+
+```{r}
+mm <- function(pars,dat){
+    rmax <- pars[1]
+    g50 <- pars[2]
+    n <- pars[3]
+    est <- rmax*(1-dat$g^n/(dat$g^n+g50^n))
+    if(dat$variable[1]=="da") est <-  rmax*(dat$g^n/(dat$g^n+g50^n))
+    return(est)
+}
+
+fit_mm <- function(pars,dat){
+  rmax <- pars[1]
+  g50 <- pars[2]
+  n <- pars[3]
+  est <- rmax*(1-dat$g^n/(dat$g^n+g50^n))
+  if(dat$variable[1]=="da") est <-  rmax*(dat$g^n/(dat$g^n+g50^n))
+  sum((est-dat$value)^2)
+}
+
+x <- readRDS("processed/glucose_vs_dcellsdt.Rds")
+pars <- c(0.5,0.01,5)
+
+x <- split(x,f=interaction(x$variable,x$ploidy))
+
+xpar <- lapply(x,function(xi){
+  optim(pars,fit_mm,dat=xi)$par
+})
+
+xfit <- do.call(rbind,lapply(1:length(x),function(i){
+  pars <- xpar[[i]]
+  df <- x[[i]]
+  df$pred <- mm(pars,df)
+  df
+}))
+
+xpar <- data.frame(do.call(rbind,xpar))
+xpar <- cbind(xpar,do.call(rbind,lapply(rownames(xpar),function(ii){
+  unlist(strsplit(ii,split="[.]"))
+})))
+colnames(xpar) <- c("rmax","g50","n","celltype","ploidy")
+xpar <- reshape2::melt(xpar,id.vars=c("celltype","ploidy"))
+
+p <- ggplot(xpar,aes(x=ploidy,y=value))+
+  facet_grid(rows=vars(variable),cols=vars(celltype),scales="free")+
+  geom_col()
+p
+
+p <- ggplot(xfit,aes(x=g,y=value,color=ploidy))+
+  facet_grid(cols=vars(variable))+
+  geom_point()+
+  geom_line(aes(y=pred))+
+  scale_x_log10()
+p
+```
+
+
+
+There is a function to load the experimental data. The data loads three different glucose datasets:
+
+gx: The original glucose measurements (using glucose monitor)
+gx1: Updated glucose measurements (using glo-assay), raw data.
+gx2: Updated glucose measurements summarized as mean + S.D. 
+
+```{r}
+
+d <- load_dat()
+
+
+
+d$gx1<-d$gx1[d$gx1$G>0.26,]
+#d$gx1$sd
+d$bx$day <- 1/3+d$bx$frame/3
+d$gx2 <- d$gx2[d$gx2$glucose%in%d$gx$glucose,]
+
+renamr <- function(gg){paste0("G0=",gg,"mM")}
+
+d$bx$gg <- sapply(d$bx$glucose,renamr)
+
+d$bx$gfac <- factor(d$bx$gg,levels=c("G0=0.1mM","G0=0.5mM","G0=1mM","G0=5mM","G0=25mM"))
+
+
+pn <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2)+
+  scale_color_discrete("")+
+  scale_x_continuous("days")+
+  scale_y_continuous("number of cells")+
+  theme_classic(base_size = 16)+
+  theme(legend.position = "top")
+pn
+
+
+d$gx1$gg <- sapply(d$gx1$glucose,renamr)
+
+d$gx1$gfac <- factor(d$gx1$gg,levels=c("G0=0.1mM","G0=0.5mM","G0=1mM","G0=5mM","G0=25mM"))
+
+pg <- ggplot(d$gx2,aes(x=day,y=G))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)
+pg
+
+
+```
+Models and fitting procedure:
+
+
+
+
+```{r}
+library(pbapply)
+library(ggplot2)
+library(roll)
+#source("Rscripts/fitting_v2.R")
+#source("Rscripts/model_v2.R")
+source("Rscripts/utils.R")
+
+source("Rscripts/utils.R")
+source("Rscripts/optimisation/fitting_funcs.R")
+source("Rscripts/prediction/competition_predictor.R")
+source("Rscripts/prediction/condition_predictor.R")
+rev <- "rev0"
+```
+
+Extract best fits (the best logl values are sure to be in the chains)
+
+```{r}
+
+extract_best <- function(model,ploidy){
+  fi <- paste0(dir,model,"/",rev,"/",ploidy,"_chain.Rds")
+  x <- readRDS(fi)[[1]]
+  
+  ll <- min(x$ll)
+  par <- x$par[x$ll==ll,]
+  
+  list(par=par,ll=ll,ploidy=ploidy,model=model)
+  
+}
+
+dir <- "best_pars/"
+models <- c("modelA","modelB","modelA3")
+
+best <- c(lapply(models, extract_best, ploidy="2N"),
+          lapply(models, extract_best, ploidy="4N"))
+saveRDS(best,paste0("best_pars/all_best_",rev,".Rds"))
+
+```
+
+Extract the best pars from the updated glucose data (temporary until chains are available)
+```{r}
+
+extract_best <- function(model,ploidy){
+  fi <- paste0(dir,model,"/",ploidy,".Rds")
+  x <- readRDS(fi)$res
+  x <- x[x[,"value"]==min(x[,"value"]),]
+  
+  par <- x[!names(x)%in%c("value","fevals","gevals","convergence")]
+  ll <- x["value"]
+  
+  mod <- unlist(strsplit(model,"/"))[1]
+  
+  list(par=par,ll=ll,ploidy=ploidy,model=mod)
+  
+}
+
+dir <- "best_pars/"
+models <- paste0(c("modelA","modelB"),"/",rev)
+
+best <- c(lapply(models, extract_best, ploidy="2N"),
+          lapply(models, extract_best, ploidy="4N"))
+saveRDS(best,paste0("best_pars/all_best_",rev,".Rds"))
+
+```
+
+plot AIC scores
+
+```{r}
+
+x <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+
+x <- do.call(rbind,lapply(x, function(xi) data.frame(ll=-xi$ll,model=xi$model,ploidy=xi$ploidy,Npar=length(xi$par))))
+x$AIC <- x$Npar*2-2*x$ll
+
+p_aic <- ggplot(x,aes(x=AIC,y=model,fill=ploidy,group=interaction(ploidy,model)))+
+  geom_col()+
+  scale_y_discrete("")+
+  scale_x_continuous("AIC")+
+  theme_classic(base_size = 12)
+p_aic
+
+```
+
+
+```{r}
+
+eval_best <- function(px){
+  model <- px$model
+  ploidy <- px$ploidy
+  par <- unlist(px$par)
+  
+  source(paste0("Rscripts/models/",model,".R"))
+  
+  df <- run_full_model(par,names(par))
+  df$day <- df$time/24
+  df <- df[,c("day","N","D","G","glucose")]
+  df$model <- model
+  df$ploidy <- ploidy
+  df
+  
+}
+
+
+best <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+best <- best[c(1,4)]
+df <- do.call(rbind,lapply(best,eval_best))
+
+df <- reshape2::melt(df,id.vars=c("day","glucose","model","ploidy"))
+colnames(df)[colnames(df)=="variable"] <- "metric"
+df$metric <- c(N="alive",D="dead",G="G")[df$metric]
+d <- load_dat()
+d$gx1<-d$gx1[d$gx1$G>0.26,]
+#d$gx1$sd
+d$bx$day <- 1/3+d$bx$frame/3
+d$gx2 <- d$gx2[d$gx2$glucose%in%d$gx$glucose,]
+
+renamr <- function(gg){paste0("G0=",gg,"mM")}
+
+d$bx$gg <- sapply(d$bx$glucose,renamr)
+df$gg <- sapply(df$glucose,renamr)
+
+d$bx$gfac <- factor(d$bx$gg,levels=c("G0=0.1mM","G0=0.5mM","G0=1mM","G0=5mM","G0=25mM"))
+df$gfac <- factor(df$gg,levels=c("G0=0.1mM","G0=0.5mM","G0=1mM","G0=5mM","G0=25mM"))
+
+pn <- ggplot(d$bx,aes(x=day,y=ncells,color=metric))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric%in%c("alive","dead"),],aes(y=as.numeric(value),group=interaction(metric,model)),size=1)+
+  geom_errorbar(aes(ymin=ncells-sd, ymax=ncells+sd), width=.2)+
+  scale_color_discrete("")+
+  scale_x_continuous("days")+
+  scale_y_continuous("number of cells")+
+  theme_classic(base_size = 16)+
+  theme(legend.position = "top")
+pn
+
+ggsave("figures/AACR_figures/model_fits_ncells.png",plot=pn,width=6,height=9,units="in")
+
+
+
+d$gx1$gg <- sapply(d$gx1$glucose,renamr)
+
+d$gx1$gfac <- factor(d$gx1$gg,levels=c("G0=0.1mM","G0=0.5mM","G0=1mM","G0=5mM","G0=25mM"))
+
+pg <- ggplot(d$gx1,aes(x=day,y=G))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point()+
+  geom_line(data=df[df$metric=="G",],aes(y=as.numeric(value),group=interaction(metric,model)))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)+
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0.5, fill = "blue", alpha = .1, color = NA)
+pg
+
+
+ggsave("figures/AACR_figures/model_fits_gluc.png",plot=pg,width=4,height=8,units="in")
+
+```
+
+
+```{r}
+base_plot_size=24
+x <- viz_mixexp(G=1,N=50,times=1:120,model="modelA")
+x$days <- x$hours/24
+y <- delta_mixexp(G=1,N = 50,times=0:120,model="modelA")
+y$days <- y$time/24
+
+
+pa <- ggplot(x[x$variable=="alive",],aes(x=days,y=value,colour=ploidy,group=interaction(rep,variable,ploidy)))+
+  geom_line()+
+  scale_y_continuous("number of cells")+
+  scale_x_continuous("time (days)")+
+  scale_color_discrete("")+
+  theme_classic(base_size=base_plot_size)+
+  ggtitle("predicted cell numbers")
+pa
+
+pb <- ggplot(y,aes(x=days))+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5,show.legend = F)+
+  geom_line(aes(y=middle))+
+    scale_y_continuous("excess of 2N cells")+
+  scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)+
+  ggtitle("predicted 2N excess")
+pb
+
+df <- readRDS("../01_data/06_mixexp_counts.Rds")
+
+df$days <- (8+df$frame*8)/24
+df2N <- df[df$label=="2N",]
+df4N <- df[df$label=="4N",]
+
+
+df <- df2N[,c("days","ncells","glucose")]
+df$ncells <- df$ncells-df4N$ncells
+
+dff <- aggregate(list(ncells=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),mean)
+
+dff$sd <- aggregate(list(sd=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),sd)$sd
+
+p2 <- ggplot(dff[dff$glucose==1,],aes(x=days))+
+  geom_point(aes(y=ncells))+
+  geom_hline(yintercept = 0,color="red",linetype=2)+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+    scale_y_continuous("excess of 2N cells")+
+    scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)+
+  ggtitle("observed 2N excess")
+p2
+
+ggsave("figures/AACR_figures/mixexp_ncells.png",plot=pa,width=6,height=4.5,units="in")
+ggsave("figures/AACR_figures/mixexp_delta_cells.png",plot=pb,width=6,height=4.5,units="in")
+ggsave("figures/AACR_figures/mixexp_data.png",plot=p2,width=6,height=4.5,units="in")
+
+
+```
+
+visualise parameter distribution
+
+```{r}
+library(ggplot2)
+load_chain <- function(ploidy){
+  x <- readRDS(paste0("best_pars/modelA/rev0/",ploidy,"_chain.Rds"))[[1]][[1]]
+  x <- exp(tail(x,round(nrow(x)/2)))
+  x$rep <- 1:nrow(x)
+  x$ploidy <- ploidy
+  x <- reshape2::melt(x,id.vars=c("rep","ploidy"))
+}
+
+x <- rbind(load_chain("2N"),load_chain("4N"))
+
+x <- x[!x$variable%in%c("g50y","ky","N","D"),]
+
+renamr <- as_labeller(c('kp'="k[p]",
+            'theta'="theta",
+            'na'="rho",
+            'g50a'="G[p]",
+            'kd'="k[d]",
+            'nd'="delta",
+            'g50d'="G[d]",
+            'v'="nu",
+            'm'="gamma",
+            'g50c'="G[g]"),label_parsed)
+
+
+
+p <- ggplot(x,aes(x=value))+
+  facet_wrap(~variable,scales="free",nrow=2,labeller=renamr)+
+  geom_histogram(aes(fill=ploidy,group=ploidy,color=ploidy),alpha=0.4,bins=15,position="identity")+
+  scale_x_log10("")+
+  scale_y_continuous("frequency")+
+  theme_classic(base_size=16)+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+p
+
+ggsave("figures/AACR_figures/posterior_distr.png",plot=p,width=12,height=6,units="in")
+
+```
+
+```{r}
+wrap_delta_mix <- function(model,gluconc,N=300){
+  df <- do.call(rbind,lapply(gluconc,function(G0){
+    delta_mixexp(G0,N = N,times=0:120,model=model)
+  }))
+  df$day <- df$time/24
+  df <- df[,!colnames(df)=="time"]
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB","modelA3")
+x <- do.call(rbind,lapply(models,wrap_delta_mix,gluconc=c(0,0.1,0.25,0.5,1)))
+
+saveRDS(x,"predictions/mixexp.Rds")
+
+
+```
+
+```{r}
+base_plot_size=12
+x <- readRDS("predictions/mixexp.Rds")
+x <- x[x$model=="modelA",]
+df <- readRDS("../01_data/06_mixexp_counts.Rds")
+
+df$days <- (8+df$frame*8)/24
+df2N <- df[df$label=="2N",]
+df4N <- df[df$label=="4N",]
+
+
+df <- df2N[,c("days","ncells","glucose")]
+df$ncells <- df$ncells-df4N$ncells
+
+dff <- aggregate(list(ncells=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),mean)
+
+dff$sd <- aggregate(list(sd=df$ncells),
+                 by=list(days=df$days,glucose=df$glucose),sd)$sd
+colnames(x)[4:5] <- c("glucose","days")
+
+
+pmix <- ggplot(x[x$glucose==1,],aes(x=days))+
+  geom_ribbon(aes(ymin=lower,ymax=upper),alpha=0.5)+
+  geom_line(aes(y=middle))+
+  scale_y_continuous("excess of 2N cells")+
+  scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+pmix
+
+p2 <- ggplot(dff[dff$glucose==1,],aes(x=days))+
+  geom_point(aes(y=ncells))+
+  geom_hline(yintercept = 0,color="red",linetype=2)+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+    scale_y_continuous("excess of 2N cells")+
+    scale_x_continuous("time (days)")+
+  theme_classic(base_size=base_plot_size)
+p2
+
+
+
+```
+
+Compare glucose dynamics
+
+```{r}
+
+glucose_dynamics_A <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- par['v']*(1/(1+par['g50c']^par['m']/G^par['m']))
+  data.frame(G,division,death,consumption)
+}
+
+glucose_dynamics_B <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- (par['v1']*(1/(1+par['g50a']^par['na']/G^par['na']))+
+                    par['v2']*(1/(1+par['g50d']^par['nd']/G^par['nd'])))/2
+  data.frame(G,division,death,consumption)
+}
+
+wrap_glucose_dynamics <- function(model,ploidy,N=100,rev="rev0"){
+  chain <- readRDS(paste0("best_pars/",model,"/",rev,"/",ploidy,"_chain.Rds"))[[1]]
+  chain <- chain$par[chain$ll<(min(chain$ll)+30),]
+  row.names(chain) <- NULL
+  chain <- tail(chain,round(nrow(chain)/2))
+  chain <- chain[sample(1:nrow(chain),N),]
+  
+  df <- do.call(rbind,lapply(1:N, function(i){
+    if(model%in%c("modelA","modelA3")) dfi <- glucose_dynamics_A(chain[i,],exponentiate = T)
+    else dfi <- glucose_dynamics_B(chain[i,],exponentiate = T)
+    dfi$rep <- i
+    dfi
+  }))
+  df$ploidy <- ploidy
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB","modelA3")
+
+df <- do.call(rbind,lapply(models, function(m){
+  rbind(wrap_glucose_dynamics(m,"2N"),
+            wrap_glucose_dynamics(m,"4N"))
+}))
+
+df <- reshape2::melt(df,id.vars=c("G","rep","ploidy","model"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy,group=interaction(ploidy,rep)))+
+  facet_grid(rows=vars(variable),cols=vars(model),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)",breaks=c(0.001,0.01,0.1,1,10),labels=c(0.001,"",0.1,"",10))+
+  scale_y_continuous("process rate (per hour)")+
+  theme_classic(base_size=12)
+p
+
+
+
+ggsave("figures/glucose_dynamics.png",width=7,height=5,units="in")
+
+```
+```{r}
+
+glucose_dynamics_A <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- 1/(1+(par['g50a']/G)^par['na'])
+  death <- 1*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- 1*(1/(1+par['g50c']^par['m']/G^par['m']))
+  data.frame(G,division,death,consumption)
+}
+
+glucose_dynamics_B <- function(par,exponentiate=F){
+  parnames <- names(par)
+  par <- as.numeric(par)
+  names(par) <- parnames
+  if(exponentiate) par <- exp(par)
+  G <- exp(seq(log(0.001),log(25),0.02))
+  division <- par['kp']/(1+(par['g50a']/G)^par['na'])
+  death <- par['kd']*(1-1/(1+(par['g50d']/G)^par['nd']))
+  consumption <- (par['v1']*(1/(1+par['g50a']^par['na']/G^par['na']))+
+                    par['v2']*(1/(1+par['g50d']^par['nd']/G^par['nd'])))/2
+  data.frame(G,division,death,consumption)
+}
+
+wrap_glucose_dynamics <- function(model,ploidy){
+  pars <- readRDS(paste0("best_pars/all_best_",rev,".Rds"))
+  p <- sapply(pars, function(p) p$ploidy)
+  m <- sapply(pars, function(p) p$model)
+  par <- pars[[which(m==model&p==ploidy)]]$par
+  
+  if(model%in%c("modelA","modelA3")){
+    df <-glucose_dynamics_A(par,exponentiate = T)
+  }else{
+    df <- glucose_dynamics_B(par,exponentiate = T)} 
+
+  
+  df$ploidy <- ploidy
+  df$model <- model
+  df
+}
+
+models <- c("modelA","modelB")
+
+df <- do.call(rbind,lapply(models, function(m){
+  rbind(wrap_glucose_dynamics(m,"2N"),
+            wrap_glucose_dynamics(m,"4N"))
+}))
+
+df <- reshape2::melt(df,id.vars=c("G","ploidy","model"))
+
+p <- ggplot(df,aes(x=G,y=value,color=ploidy,group=ploidy))+
+  facet_grid(rows=vars(variable),cols=vars(model),scales="free")+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)")+
+  scale_y_continuous("process rate (per hour)")+
+  theme_bw()
+p
+
+pb <- ggplot(df[df$ploidy=="2N"&df$model=="modelA",],aes(x=G,y=value,color=variable,group=variable))+
+  geom_line()+
+  scale_x_log10("Glucose concentration in media (mM)")+
+  scale_y_continuous("process rate (per hour)")+
+  theme_classic(base_size=16)+
+  scale_color_discrete("",labels=c(expression(S[p]),
+                                   expression(S[d]),
+                                   expression(S[g])))+
+  ggtitle("Glucose dynamics of 2N cells")
+pb
+
+ggsave("figures/AACR_figures/glucose_dynamics.png",width=6,height=4,units="in")
+
+```
+
+```{r}
+
+
+
+x2 <- viz_fits(50,"2N",gluconc = c(0,0.1,0.2,0.5,1),model=model)
+x4 <- viz_fits(50,"4N",gluconc = c(0,0.1,0.2,0.5,1),model=model)
+
+x <- rbind(x2,x4)
+
+
+p1 <- ggplot(data=x[x$metric%in%c("alive","dead"),],aes(x=day,y=as.numeric(value),color=metric))+
+  facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
+  geom_line(aes(group=interaction(rep,metric)))+ggtitle(model)+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p1
+
+
+
+```
