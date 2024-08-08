@@ -32,9 +32,9 @@ wrap_opt <- function(ploidy,model,Ntrial=100){
   return(res)
 }
 library(parallel)
-ncores <- 3
+ncores <- 70
 Ntrial <- 100
-Nstarts <- 3
+Nstarts <- 5000
 cl <- makeCluster(getOption("cl.cores", ncores))
 
 opt_2n_b <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
