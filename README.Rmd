@@ -312,6 +312,63 @@ y <- lapply(y,function(yi){
 saveRDS(y,"data/fitting/fitting_data_v1.Rds")
 ```
 
+```{r}
+
+proc_gluc_data <- function(xg){
+  xg <- xg[!xg$Dilution==1,]
+  xtmp <- xg[xg$ploidy=="NaN",]
+  xg$ploidy[xg$ploidy=="NaN"] <- "2N"
+  xtmp$ploidy <- "4N"
+  xg <- rbind(xtmp,xg)
+  xg <- reshape2::melt(xg,id.vars=c("G","Dilution","day","ploidy"))
+  xg
+}
+
+melt_cell_data <- function(x){
+  x$day <- (x$frame*8+8)/24
+  xtmp <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    mean)
+  xtmp$sd <- aggregate(list(ncells=x$ncells),
+                    by=list(day=x$day,
+                            metric=x$label,
+                            ploidy=x$ploidy,
+                            glucose=x$glucose),
+                    sd)$ncells
+  xtmp
+}
+
+melt_g_data <- function(x){
+  aggregate(list(fluor=x$value),
+                    by=list(day=x$day,
+                            ploidy=x$ploidy,
+                            dilution = x$Dilution,
+                            glucose=x$G),
+                    mean)
+  
+}
+
+x <- readRDS("data/raw/221112_ilastik_counts.Rds")
+#x <- x[!x$glucose==0,]
+xg <- read.csv("data/raw/221112_glucose_consumption.csv")
+#xg <- xg[!xg$G==0,]
+xg <- proc_gluc_data(xg)
+x <- melt_cell_data(x)
+xg <- melt_g_data(xg)
+
+y <- split(x,f=interaction(x$ploidy,x$glucose))
+y <- lapply(y,function(yi){
+  ploidy <- yi$ploidy[1]
+  glucose <- yi$glucose[1]
+  xgi <- xg[xg$ploidy==ploidy & xg$glucose==glucose,]
+  list(bx=yi,gx=xgi)
+})
+
+saveRDS(y,"data/fitting/fitting_data_onlynew.Rds")
+```
 
 Previously, we fit various models to the PROBE glucose data. These fits can be run as follows:
 
@@ -443,25 +500,25 @@ info <- model_info()
 X <- readRDS(paste0("data/fitted_parameters/new_data_v1/opt_",ploidy,"_",model,".Rds"))
 v <- X[,"value"]
 par <- X[v==min(v),!colnames(X)=="value"]
-X <- X[v-min(v)<5,!colnames(X)=="value"]
+X <- X[v-min(v)<50,!colnames(X)=="value"]
 
-#df_curve <- do.call(rbind,lapply(1:nrow(X),function(i){
- # pp <- X[i,]
-  #names(pp) <- colnames(X)
-  #df <- plot_curves(pp,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
-  #df$id <- i
-  #return(df)
-#}))
-df_curve <- plot_curves(par,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
-df_curve$id <- 1
+df_curve <- do.call(rbind,lapply(1:nrow(X),function(i){
+  pp <- X[i,]
+  names(pp) <- colnames(X)
+  df <- plot_curves(pp,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
+  df$id <- i
+  return(df)
+}))
+#df_curve <- plot_curves(par,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
+#df_curve$id <- 1
 df <- run_old_model(as.numeric(par),names(par),gluconc=gluconc,ploidy = ploidy)
 df$curves <- df_curve
 df
 }
 
-model <- "B"
+model <- "A3"
 source(paste0("Rscripts/models/model",model,".R"))
-new_dat <- readRDS("data/fitting/fitting_data_v1.Rds")
+new_dat <- readRDS("data/fitting/fitting_data_onlynew.Rds")
 new_dat <- melt_data_for_plotting(new_dat)
 gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
 
