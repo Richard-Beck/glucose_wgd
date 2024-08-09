@@ -109,10 +109,10 @@ model_info <- function(){
   list(parnames=parnames,upper=upper,lower=lower)
 }
 
-plot_curves <- function(pars,ploidy){
+plot_curves <- function(pars,ploidy,G = seq(0.001,1,0.001)){
   pars <- exp(pars)
   with(as.list(pars),{
-    G <- seq(0.001,1,0.001)
+    
     df <- data.frame(G,ploidy,
                      div=kp/(1+(g50a/G)^na),
                      death=kd*(1-1/(1+(g50d/G)^nd)),
