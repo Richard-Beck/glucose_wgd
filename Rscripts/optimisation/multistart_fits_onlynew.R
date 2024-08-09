@@ -36,22 +36,23 @@ ncores <- 70
 Ntrial <- 100
 Nstarts <- 1000
 cl <- makeCluster(getOption("cl.cores", ncores))
-dir.create("data/fitted_parameters/onlynew")
+outdir <- "data/fitted_parameters/onlynew"
+dir.create(outdir)
 opt_2n_b <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
                                       fun = wrap_opt, model="B",Ntrial=Ntrial))
-saveRDS(opt_2n_b,file="data/fitted_parameters/new_data_v1/opt_2N_B.Rds")
+saveRDS(opt_2n_b,file=paste0(outdir,"/opt_2N_B.Rds"))
 
 opt_4n_b <- do.call(rbind,parLapplyLB(cl,X=rep("4N",Nstarts),
                                       fun = wrap_opt, model="B",Ntrial=Ntrial))
-saveRDS(opt_4n_b,file="data/fitted_parameters/new_data_v1/opt_4N_B.Rds")
+saveRDS(opt_4n_b,file=paste0(outdir,"/opt_4N_B.Rds"))
 
 opt_2n_a3 <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
                                       fun = wrap_opt, model="A3",Ntrial=Ntrial))
-saveRDS(opt_2n_a3,file="data/fitted_parameters/new_data_v1/opt_2N_A3.Rds")
+saveRDS(opt_2n_a3,file=paste0(outdir,"/opt_2N_A3.Rds"))
 
 opt_4n_a3 <- do.call(rbind,parLapplyLB(cl,X=rep("4N",Nstarts),
                                        fun = wrap_opt, model="A3",Ntrial=Ntrial))
-saveRDS(opt_4n_a3,file="data/fitted_parameters/new_data_v1/opt_4N_A3.Rds")
+saveRDS(opt_4n_a3,file=paste0(outdir,"/opt_4N_A3.Rds"))
 
 
 
