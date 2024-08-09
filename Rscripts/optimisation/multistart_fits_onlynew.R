@@ -34,7 +34,7 @@ wrap_opt <- function(ploidy,model,Ntrial=100){
 library(parallel)
 ncores <- 70
 Ntrial <- 100
-Nstarts <- 5000
+Nstarts <- 1000
 cl <- makeCluster(getOption("cl.cores", ncores))
 dir.create("data/fitted_parameters/onlynew")
 opt_2n_b <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
