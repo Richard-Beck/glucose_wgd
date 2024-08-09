@@ -34,7 +34,7 @@ wrap_opt <- function(ploidy,model,Ntrial=100){
 library(parallel)
 ncores <- 70
 Ntrial <- 100
-Nstarts <- 1000
+Nstarts <- 10000
 cl <- makeCluster(getOption("cl.cores", ncores))
 outdir <- "data/fitted_parameters/onlynew"
 dir.create(outdir)

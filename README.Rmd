@@ -497,26 +497,26 @@ gluconc <- unique(new_dat$bx$glucose)
 
 source(paste0("Rscripts/models/model",model,".R"))
 info <- model_info()
-X <- readRDS(paste0("data/fitted_parameters/new_data_v1/opt_",ploidy,"_",model,".Rds"))
+X <- readRDS(paste0("data/fitted_parameters/onlynew/opt_",ploidy,"_",model,".Rds"))
 v <- X[,"value"]
 par <- X[v==min(v),!colnames(X)=="value"]
 X <- X[v-min(v)<50,!colnames(X)=="value"]
 
-df_curve <- do.call(rbind,lapply(1:nrow(X),function(i){
-  pp <- X[i,]
-  names(pp) <- colnames(X)
-  df <- plot_curves(pp,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
-  df$id <- i
-  return(df)
-}))
-#df_curve <- plot_curves(par,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
-#df_curve$id <- 1
+#df_curve <- do.call(rbind,lapply(1:nrow(X),function(i){
+  #pp <- X[i,]
+  #names(pp) <- colnames(X)
+  #df <- plot_curves(pp,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
+  #df$id <- i
+ # return(df)
+#}))
+df_curve <- plot_curves(par,ploidy = ploidy,G=exp(seq(-12,2,length.out=100)))
+df_curve$id <- 1
 df <- run_old_model(as.numeric(par),names(par),gluconc=gluconc,ploidy = ploidy)
 df$curves <- df_curve
 df
 }
 
-model <- "A3"
+model <- "B"
 source(paste0("Rscripts/models/model",model,".R"))
 new_dat <- readRDS("data/fitting/fitting_data_onlynew.Rds")
 new_dat <- melt_data_for_plotting(new_dat)
