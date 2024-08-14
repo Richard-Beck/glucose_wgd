@@ -136,7 +136,7 @@ run_old_model <- function(pars,parNames,gluconc=c(0.1,0.5,1,5,25),times = seq(0,
 
 fit_full_model <- function(pars,dat,parNames,fixpars=NULL,ploidy="2N",glu_dat=NULL,
                            theta_hat=NULL,gpar=NULL){
-  
+  print("FUNCTION DEPRECATED! HOPE THERES A GOOD REASON FOR RUNNING THIS...")
   Vpen <- 0
   if(!is.null(theta_hat)){
     Vpen <- (sqrt(sum((pars-theta_hat)^2))-1)^2
@@ -201,4 +201,165 @@ fit_full_model <- function(pars,dat,parNames,fixpars=NULL,ploidy="2N",glu_dat=NU
   res <- sum(errs/2)+Vpen
   print(res)
   return(res)
+}
+
+## this gets names and ranges for initial value parameters.
+## Current assumption is every glucose batch has a unique G0 value,
+## and every experiment/ploidy has a different initial ncells0
+get_ics <- function(dat,ploidy){
+  ncells1 <- mean(dat$bx1$ncells[dat$bx1$ploidy==ploidy&dat$bx1$day==min(dat$bx1$day)&dat$bx1$label=="alive"])
+  ncells2 <- mean(dat$bx2$ncells[dat$bx2$ploidy==ploidy&dat$bx2$day==min(dat$bx2$day)&dat$bx2$label=="alive"])
+  gconc1 <- as.numeric(unique(dat$gx1$glucose))
+  gconc2 <- as.numeric(unique(dat$gx2$glucose))
+  
+  parnames <- c(paste0("ic_",c("N1","N2")),
+                paste0("ic_",c(paste0("G1_",gsub("[.]","p",gconc1)),
+                               paste0("G2_",gsub("[.]","p",gconc2)))))
+  
+  parvals <- c(ncells1,ncells2,gconc1,gconc2)
+  upper <- parvals*1.3
+  upper[upper==0] <- 0.01
+  lower <- parvals*0.7
+  lower[lower==0] <- 0.000001
+  list(parnames=parnames,upper=upper,lower=lower)
+}
+
+unpack_pars <- function(pars){
+  icpars <- pars[grepl("ic_",names(pars))]
+  pars <- pars[!grepl("ic_",names(pars))]
+  
+  exp1 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G1_",names(icpars))]))
+  exp1$glucose <- sapply(rownames(exp1),function(ri){
+    gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
+  })
+  exp2 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G2_",names(icpars))]))
+  exp2$glucose <- sapply(rownames(exp2),function(ri){
+    gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
+  })
+  list(pars=pars,exp1=exp1,exp2=exp2)
+}
+
+err_experiment <- function(par,gs,ics,bx,gx){
+  
+  errs <- tryCatch(sapply(1:nrow(ics),function(i){
+    gi <- ics$glucose[i]
+    bxi <- bx[bx$glucose==gi,]
+    gxi <- gx[gx$glucose==gi,]
+    y0 <- c(N=ics$N[i],D=0,G=ics$G[i])
+    times <- seq(0,144,1)
+  
+    x   <- data.frame(run_mod(par, times, y0))
+    colnames(x)[1:4] <- c("time","N","D","G")
+    ya <- x$N[x$time%in%(bxi$day[bxi$label=="alive"]*24)]
+    yd <- x$D[x$time%in%(bxi$day[bxi$label=="dead"]*24)]
+    
+    xa <- bxi$ncells[bxi$label=="alive"]
+    xd <- bxi$ncells[bxi$label=="dead"]
+    
+    sda <- bxi$sd[bxi$label=="alive"]
+    sdd <- bxi$sd[bxi$label=="dead"]
+    
+    xx <- c(xa,xd)
+    yy <- c(ya,yd)
+    sdx <- c(sda,sdd)
+    
+    bx_errs <- (xx-yy)^2/sdx^2
+    gx_errs <- 0
+    
+    if("G"%in%colnames(gxi)){ ## fitting experiment 1
+      yg <- x$G[x$time%in%(gxi$day*24)]
+      gx_errs <- (yg-gxi$G)^2/gxi$sd^2
+    }
+    if("lum"%in%colnames(gxi)){##fitting to experiment 2
+      logf <- log(gxi$lum)
+      yg <- x$G[x$time%in%(gxi$day*24)]
+      gx_errs <- -gs$pg(glu = yg/gxi$dilution,lum = gxi$lum,gpar = gs$gpar,aslog=T)
+      
+    }
+    
+    ll <- c(bx_errs,gx_errs)
+    ll[is.na(ll)] <- 10^11
+    ll <- sum(ll)
+    return(ll)
+  }),error=function(e) return(10^11),
+  warning = function(w) return(10^9))
+  
+  res <- sum(errs)
+  return(res)
+}
+
+run_experiment <- function(par,gs,ics,bx,gx){
+  
+  x <- tryCatch(lapply(1:nrow(ics),function(i){
+    gi <- ics$glucose[i]
+    bxi <- bx[bx$glucose==gi,]
+    gxi <- gx[gx$glucose==gi,]
+    y0 <- c(N=ics$N[i],D=0,G=ics$G[i])
+    times <- seq(0,144,1)
+    
+    x   <- data.frame(run_mod(par, times, y0))
+    colnames(x)[1:4] <- c("day","N","D","G")
+    x$day <- x$day/24
+    
+    bx_alive <- x[,c("day","N")]
+    bx_dead <- x[,c("day","D")]
+    bx_alive$label <- "alive"
+    bx_dead$label <- "dead"
+    colnames(bx_alive)[2] <- "ncells"
+    colnames(bx_dead)[2] <- "ncells"
+    bxi <- rbind(bx_alive,bx_dead)
+    bxi$glucose <- gi
+    
+    gxi <- x[,c("day","G")]
+    gxi$glucose <- gi
+    
+    return(list(gx=gxi,bx=bxi))
+    
+    
+  }),error=function(e) return(NULL))
+  
+  bx <- do.call(rbind,lapply(x,function(xi) xi$bx))
+  gx <- do.call(rbind,lapply(x,function(xi) xi$gx))
+  
+  return(list(bx=bx,gx=gx))
+}
+
+masterfit <- function(pars,dat,parNames,gs,ploidy="2N"){
+  
+  pars <- exp(pars)
+  names(pars) <- parNames
+  pars <- unpack_pars(pars)
+  err1 <- err_experiment(par = pars$pars,gs,ics=pars$exp1,
+                         bx=dat$bx1[dat$bx1$ploidy==ploidy,],
+                         gx=dat$gx1[dat$gx1$ploidy==ploidy,])
+  err2 <- err_experiment(par=pars$pars,gs,ics=pars$exp2,
+                         bx=dat$bx2[dat$bx2$ploidy==ploidy,],
+                         gx=dat$gx2[dat$gx2$ploidy==ploidy,])
+  
+  print(paste0("exp1 err: ",err1))
+  print(paste0("exp2 err: ",err2))
+  return(err1+err2)
+}
+
+masterrun <- function(pars,dat,parNames,gs,ploidy="2N"){
+  
+  pars <- exp(pars)
+  names(pars) <- parNames
+  pars <- unpack_pars(pars)
+  x1 <- run_experiment(par = pars$pars,gs,ics=pars$exp1,
+                         bx=dat$bx1[dat$bx1$ploidy==ploidy,],
+                         gx=dat$gx1[dat$gx1$ploidy==ploidy,])
+  x1$bx$id <- "exp 1"
+  x1$gx$id <- "exp 1"
+  x2 <- run_experiment(par=pars$pars,gs,ics=pars$exp2,
+                         bx=dat$bx2[dat$bx2$ploidy==ploidy,],
+                         gx=dat$gx2[dat$gx2$ploidy==ploidy,])
+  x2$bx$id <- "exp 2"
+  x2$gx$id <- "exp 2"
+  bx<-rbind(x1$bx,x2$bx)
+  gx<-rbind(x1$gx,x2$gx)
+  bx$ploidy <- ploidy
+  gx$ploidy <- ploidy
+  x <- list(bx=bx,gx=gx)
+  return(x)
 }

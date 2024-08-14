@@ -1,0 +1,58 @@
+---
+title: "Data processing"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/glucose_wgd/")
+```
+
+```{r}
+library(ggplot2)
+source("Rscripts/utils.R")
+
+```
+
+```{r}
+fit_dat <- readRDS("data/fitting/fit_dat.Rds")
+plot_dat <- readRDS("data/processed/plot_dat.Rds")
+gs <- readRDS("data/fitted_parameters/glucose_struct.Rds")
+```
+
+```{r}
+wrap_run_fit <- function(model,ploidy=c("2N","4N")){
+  source(paste0("Rscripts/models/model",model,".R"))
+  x <- lapply(ploidy,function(pp){
+    opt <- readRDS(paste0("data/fitted_parameters/opt_",pp,"_",model,".Rds"))
+    pars <- opt[opt[,"value"]==min(opt[,"value"])]
+    names(pars) <- colnames(opt)
+    pars <- pars[!names(pars)=="value"]
+    xi <- masterrun(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=pp)
+  })
+  
+  bx <- do.call(rbind,lapply(x,function(xi) xi$bx))
+  gx <- do.call(rbind,lapply(x,function(xi) xi$gx))
+  list(bx=bx,gx=gx)
+    
+}
+x <- wrap_run_fit(model="B")
+
+
+
+p <- ggplot(plot_dat$gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))+
+  geom_line(data=x$gx)
+p
+
+p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=x$bx)
+p
+
+```

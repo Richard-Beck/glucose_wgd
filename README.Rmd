@@ -15,10 +15,196 @@ source("Rscripts/utils.R")
 
 ```
 
+Visualisation of the "initial dataset":
+
+```{r}
+
+x <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x$day <- (x$frame*8+8)/24
+x <- x[order(x$glucose),]
+x$ploidy <- paste0("ploidy=",x$ploidy)
+
+renamr <- function(gg){paste0("G=",gg,"mM")}
+x$glucose <- renamr(x$glucose)
+x$gfac <- factor(x$glucose,levels=unique(x$glucose))
+
+xagg <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                                gfac=x$gfac),mean)
+xagg$sd <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                                gfac=x$gfac),sd)$ncells
+
+p1a <- ggplot(x,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(ploidy),rows=vars(gfac),scales="free")+
+  geom_point()+
+  theme_bw()+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p1a
+p1b <- ggplot(xagg,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(ploidy),rows=vars(gfac),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  theme_bw()+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p1b
+
+xg <- read.csv("data/raw/220823_Glucose consumption_Sum159_2N_4N.csv")
+colnames(xg)[2:6] <- c(0.1,0.5,1,5,25)
+xg <- reshape2::melt(xg,id.vars=c("rep","day","ploidy"))
+xg$value <- as.numeric(xg$value)
+
+xg$value <- xg$value/18.018
+xcalib <- xg[xg$day==0&xg$ploidy=="2N"&!is.na(xg$value),]
+xcalib$variable <- as.numeric(as.character(xcalib$variable))
+pred <- lm(variable~value,data=xcalib)
+xcalib$pred <- predict(pred,xcalib)
+
+pmap <- ggplot(xcalib,aes(x=value,y=variable))+
+  geom_point()+
+  geom_line(aes(y=pred,color="inferred"))+
+  geom_abline(aes(slope=1,intercept=0,color="ideal"))+
+  scale_x_continuous("measured glucose (mM)")+
+  scale_y_continuous("inferred glucose (mM)")+
+  scale_color_discrete("")
+pmap
+xg$glu_inf <- predict(pred,xg)
+xg$glucose <- renamr(xg$variable)
+xg$gfac <- factor(xg$glucose,levels=unique(xg$glucose))
+xg$ploidy <- paste0("ploidy=",xg$ploidy)
+
+
+
+xgagg <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                gfac=xg$gfac),mean)
+xgagg$sd <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                gfac=xg$gfac),sd)$G
+xgagg$G[is.na(xgagg$G)] <- 0.2576315
+xgagg$sd[is.na(xgagg$sd)] <- 0.14892716
+xgagg$value <- NaN
+xgagg$value[!xgagg$G == xgagg$G[1]] <- xgagg$G[!xgagg$G == xgagg$G[1]]
+xgagg$glu_inf <- predict(pred,xgagg)
+saveRDS(xgagg,"../01_data/04b_fitting_glucose.Rds")
+
+pg1 <- ggplot(xg,aes(x=day,y=value))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point(aes(color="measured"))+
+  geom_point(aes(y=glu_inf,color="inferred"))+
+ # geom_point(aes(y=glu_inf,color="inferred"))+
+  #geom_line(data=df[df$metric=="G",],aes(y=as.numeric(value),group=interaction(metric,model)))+
+  #geom_errorbar(aes(ymin=G-sd, ymax=G+sd), width=.2)+
+  #geom_errorbar(data=d$gx2,aes(ymin=G-sd, ymax=G+sd), width=.2,color="red") 
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)+
+  scale_color_discrete("")+
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0.5, fill = "blue", alpha = .1, color = NA)
+pg1
+
+xgagg$glu_inf[is.na(xgagg$glu_inf)] <- xgagg$G[is.na(xgagg$glu_inf)]
+
+pg2 <- ggplot(xgagg,aes(x=day,y=G))+
+  facet_grid(rows=vars(gfac),cols=vars(ploidy),scales="free")+
+  geom_point(aes(color="measured"))+
+  geom_errorbar(aes(ymin=G-sd, ymax=G+sd,color="measured"), width=.2)+
+  geom_point(aes(color="inferred",y=glu_inf))+
+  geom_errorbar(aes(ymin=glu_inf-sd, ymax=glu_inf+sd,color="inferred"), width=.2)+
+  scale_x_continuous("days")+
+  scale_y_continuous("glucose (mM)")+
+  theme_classic(base_size = 16)+
+    scale_color_discrete("")+
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = 0.5, fill = "blue", alpha = .1, color = NA)
+pg2
+
+
+```
+Compare initial and update cell counts:
+```{r}
+
+x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x1$id <- "experiment 1"
+x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
+x2$id <- "experiment 2"
+
+x <- rbind(x1,x2)
+x$day <- (8*x$frame+8)/24
+x <- x[order(x$glucose),]
+renamr <- function(gg){paste0("G=",gg,"mM")}
+x$glucose <- renamr(x$glucose)
+x$gfac <- factor(x$glucose,levels=unique(x$glucose))
+
+p1a <- ggplot(x,aes(x=day,y=ncells,color=label,shape=id))+
+  facet_grid(cols=vars(ploidy),rows=vars(gfac),scales="free")+
+  geom_point()+
+  theme_bw()+
+  scale_y_continuous("number of cells")+
+  scale_color_discrete("")
+p1a
+
+
+```
+
 We would like any regression to be valid at low fluourescence values. Unfortunately ours isn't because the residuals scale with the independent variable (heteroscedacity). 
 Heteroscedacity is when residuals have non-constant variance.
 Heteroscedacity violates assumptions of OLS regression.
 Data variability appears independent of glucose concentration when normalized by mean fluorescence intensity.
+
+Demo growth curves
+
+```{r}
+
+source("Rscripts/models/modelA3.R")
+
+pars <- model_info()$upper
+names(pars) <- model_info()$parnames
+
+pars["kp"] <- 0.2
+pars["kd"] <- 0.5
+pars["g50a"] <- 0.2
+pars["g50d"] <- 0.03
+pars["g50c"] <- 0.3
+pars["na"] <- 2
+pars["m"] <- 2
+pars["v"] <- 0.3
+
+df <- plot_curves(log(pars),"2N")
+
+p <- ggplot(df,aes(x=G,y=value,color=variable))+
+  geom_line()+
+  scale_x_log10("glucose (mM)")+
+  scale_y_continuous("process rate")+
+  scale_color_discrete("process")+
+  theme_bw(base_size = 12)
+p
+
+source("Rscripts/models/modelB.R")
+pars <- model_info()$upper
+names(pars) <- model_info()$parnames
+pars["kp"] <- 0.2
+pars["kd"] <- 0.5
+pars["g50a"] <- 0.2
+pars["g50d"] <- 0.02
+pars["na"] <- 2
+pars["nd"] <- 5
+pars["v1"] <- 0.3
+pars["v2"] <- 0.1
+
+df <- plot_curves(log(pars),"2N")
+
+p <- ggplot(df,aes(x=G,y=value,color=variable))+
+  geom_line()+
+  scale_x_log10("glucose (mM)")+
+  scale_y_continuous("process rate")+
+  scale_color_discrete("process")+
+  theme_bw(base_size = 12)
+p
+```
 
 ```{r}
 G <- exp(seq(log(2e-06),log(1e-01),length.out=30))
@@ -292,7 +478,7 @@ melt_g_data <- function(x){
 
 x1 <- readRDS("data/raw/220823_ilastik_counts.Rds")
 x2 <- readRDS("data/raw/221112_ilastik_counts.Rds")
-x1 <- x1[x1$glucose%in%c(5,25),] ## for v1
+#x1 <- x1[x1$glucose%in%c(5,25),] ## for v1
 x <- rbind(x1,x2)
 x <- x[!x$glucose==0,]
 xg <- read.csv("data/raw/221112_glucose_consumption.csv")
@@ -309,7 +495,7 @@ y <- lapply(y,function(yi){
   list(bx=yi,gx=xgi)
 })
 
-saveRDS(y,"data/fitting/fitting_data_v1.Rds")
+saveRDS(y,"data/fitting/fitting_data.Rds")
 ```
 
 ```{r}
@@ -386,8 +572,10 @@ wrap_run_old_model <- function(model,gluconc){
   }
   x2n <- run_old_model(as.numeric(par2N),names(par2N),gluconc=gluconc,ploidy = "2N" )
   x4n <- run_old_model(as.numeric(par4N),names(par4N),gluconc=gluconc,ploidy = "4N" )
-  list(bx=rbind(x2n$bx,x4n$bx),gx=rbind(x2n$gx,x4n$gx))
-
+  res <- list(bx=rbind(x2n$bx,x4n$bx),gx=rbind(x2n$gx,x4n$gx))
+  res$bx$model <- model
+  res$gx$model <- model
+  return(res)
   ####################################
   # TO GET THE LL SCORE, AS FOLLOWS::
   #parnames <- names(par2N)
@@ -401,27 +589,30 @@ wrap_run_old_model <- function(model,gluconc){
 
 models <- c("model0","modelA","modelB","modelA3")
 
-model <- models[4]
-new_dat <- readRDS("data/fitting/fitting_data.Rds")
+model <- models[3]
+new_dat <- readRDS("data/fitting/fitting_data_onlynew.Rds")
 new_dat <- melt_data_for_plotting(new_dat)
 gpar <- readRDS("data/fitted_parameters/glu_pars.Rds")
 new_dat$gx <- transform_fluor_for_plotting(new_dat$gx,gpar)
 gluconc <- unique(new_dat$bx$glucose)
 
 
-df <- wrap_run_old_model(model,gluconc=gluconc)
+#df1 <- wrap_run_old_model(model="modelA",gluconc=gluconc)
+df2 <- wrap_run_old_model(model="modelB",gluconc=gluconc)
+
+df <- df2#list(gx=rbind(df1$gx,df2$gx),bx=rbind(df1$bx,df2$bx))
 
 pb <- ggplot(new_dat$bx,aes(x=day,y=ncells,color=metric))+
   facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
   geom_point()+
   geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
-  geom_line(data=df$bx)
+  geom_line(data=df$bx,aes(linetype=model))
 pb
 
 pg <- ggplot(new_dat$gx,aes(x=day,y=G))+
   facet_grid(rows=vars(glucose),cols=vars(ploidy),scales="free")+
   geom_point()+
-  geom_line(data=df$gx)+
+  geom_line(data=df$gx,aes(linetype=model))+
   geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
 pg
 ```

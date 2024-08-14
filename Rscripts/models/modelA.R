@@ -101,9 +101,9 @@ run_mixmod <- function(p0,times,y0,G){
 
 ##info required for running or fitting model
 model_info <- function(){
-  parnames <- c("kp", "theta", "na", "g50a", "kd", "nd", "g50d", "v"  , "m", "g50c", "g50y", "ky" ,"N" , "D")
-  lower <-    c(0.01, 6000   , 0.1 , 0.001 , 0.01, 0.1 , 0.001 , 1e-8 , 0.1, 0.001 , 5000  , 0.001,100 , 1)
-  upper <-    c(1   , 50000  , 25  , 5     , 1   , 25  , 5     , 0.001, 25 , 5     , 500000, 1    ,1000, 500)
+  parnames <- c("kp", "theta", "na", "g50a", "kd", "nd", "g50d", "v"  , "m", "g50c", "g50y", "ky" )
+  lower <-    c(0.01, 6000   , 0.1 , 0.001 , 0.01, 0.1 , 0.001 , 1e-8 , 0.1, 0.001 , 5000  , 0.001)
+  upper <-    c(1   , 50000  , 25  , 5     , 1   , 25  , 5     , 0.001, 25 , 5     , 500000, 1)
   list(parnames=parnames,upper=upper,lower=lower)
 }
 

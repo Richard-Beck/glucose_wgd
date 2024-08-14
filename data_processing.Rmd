@@ -1,0 +1,205 @@
+---
+title: "Data processing"
+author: "Richard J Beck"
+date: "3/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyModeling/06_ploidy_glucose/glucose_wgd/")
+```
+
+```{r}
+library(ggplot2)
+source("Rscripts/utils.R")
+
+```
+
+```{r}
+fit_dat <- list()
+plot_dat <- list()
+```
+
+Processing data from first experiment.
+One issue to consider is how we get the standard deviation of the glucose measurements. I think we need to do something more sophisticated than simply take the std.dev of the measurements? With the current approach, I think we are effectively weighting the glucose data from experiment 1 more heavily than that from experiment 2. 
+
+```{r}
+
+x <- readRDS("data/raw/220823_ilastik_counts.Rds")
+x$day <- (x$frame*8+8)/24
+
+bx <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                              glucose=x$glucose),mean)
+bx$sd <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                              glucose=x$glucose),sd)$ncells
+
+fit_dat$bx1 <- bx
+bx$id <- "exp 1"
+plot_dat$bx <- bx
+
+xg <- read.csv("data/raw/220823_Glucose consumption_Sum159_2N_4N.csv")
+colnames(xg)[2:6] <- c(0.1,0.5,1,5,25)
+xg <- reshape2::melt(xg,id.vars=c("rep","day","ploidy"))
+xg$value <- as.numeric(xg$value)
+
+xg$value <- xg$value/18.018
+
+gx <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                glucose=xg$variable),mean)
+gx$sd <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                glucose=xg$variable),sd)$G
+
+## some points have zero std.dev. 
+opt <- lm(sd~G,data=gx)
+
+gx$G[is.na(gx$G)] <- 0.2576315 # mean(runif(10000,0,0.5))
+gx$sd[is.na(gx$sd)] <- 0.14892716 # sd(runif(10000,0,0.5))
+gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$glucose <- as.character(gx$glucose)
+fit_dat$gx1 <- gx
+
+gx$Gmin <- gx$G-gx$sd
+gx$Gmax <- gx$G+gx$sd
+
+gx <- gx[,!colnames(gx)=="sd"]
+gx$id <- "exp 1"
+plot_dat$gx <- gx
+
+p <- ggplot(bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))
+p
+
+p <- ggplot(gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+p
+
+```
+
+Processing data from experiment 2.
+
+First perform the glucose calibration and save the relevant parameters and functions:
+
+```{r}
+
+
+glu_prob <- function(glu,lum,gpar,aslog=F){
+  Elum <- gpar["a"]*glu + gpar["b"]
+  dnorm(log(lum)-log(Elum),sd=gpar["sd"],log = aslog)
+}
+
+glu_quantiles <- function(lum,q=c(0.95,0.5,0.05),gpar){
+  (exp(log(lum)-qnorm(p=q,sd=gpar["sd"]))-gpar["b"])/gpar["a"]
+}
+
+fit_log <- function(pars,dat){
+  sqrt(mean((log(dat$G*abs(pars[1])+abs(pars[2]))-log(dat$value))^2))
+}
+x <- read.csv("data/raw/221112_glucose_consumption.csv")
+x <- reshape2::melt(x,id.vars=c("G","Dilution","day","ploidy"))
+xcalib <- x[x$day==0&x$G>0,]
+xcalib$G <- xcalib$G/xcalib$Dilution
+
+p0 <- c(150000,20000)*1000
+
+opt <- optim(p0,fit_log,dat=xcalib)
+pars <- abs(opt$par)
+
+pred_F <- xcalib$G*abs(pars[1])+abs(pars[2])
+
+sdlog <- sd(log(pred_F)-log(xcalib$value))
+
+glu_pars <- c(pars,sdlog)
+names(glu_pars) <- c("a","b","sd")
+
+glucose_struct <- list(gpar=glu_pars,pg=glu_prob,qp=glu_quantiles)
+
+glucose_struct$qp(30000,gpar=glucose_struct$gpar)
+saveRDS(glucose_struct,"data/fitted_parameters/glucose_struct.Rds")
+
+```
+
+Note that there is a difference in survivorship between experiments 1 & 2. This does not appear to be related to errors in cell counting, could there be differences in the media instead??
+
+```{r}
+
+x <- readRDS("data/raw/221112_ilastik_counts.Rds")
+x$day <- (x$frame*8+8)/24
+
+bx <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                              glucose=x$glucose),mean)
+bx$sd <- aggregate(list(ncells=x$ncells),by=list(label=x$label,
+                                                day=x$day,
+                                                ploidy=x$ploidy,
+                                              glucose=x$glucose),sd)$ncells
+fit_dat$bx2 <- bx
+
+bx$id <- "exp 2"
+plot_dat$bx <- rbind(plot_dat$bx,bx)
+p <- ggplot(bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))
+p
+
+gx <- read.csv("data/raw/221112_glucose_consumption.csv")
+gs <- readRDS("data/fitted_parameters/glucose_struct.Rds")
+
+gx <- gx[!gx$Dilution==1,]
+tmp <- gx[gx$ploidy=="NaN" ]
+tmp$ploidy <- "2N"
+gx$ploidy[gx$ploidy=="NaN"] <- "4N"
+gx <- rbind(tmp,gx)
+
+gx <- reshape2::melt(gx,id.vars=c("G","Dilution","day","ploidy"))
+
+gx <- aggregate(list(lum=gx$value),by=list(glucose=gx$G,dilution=gx$Dilution,
+                                           day=gx$day,ploidy=gx$ploidy),mean)
+gx <- gx[gx$glucose<5,]
+fit_dat$gx2 <- gx
+
+
+gxp <- data.frame(do.call(rbind,lapply(gx$lum,gs$qp,gpar=gs$gpar)))
+gxp <- gxp*gx$dilution
+colnames(gxp) <- c("Gmin","G","Gmax")
+gx <- cbind(gx[,c("day","ploidy","glucose")],gxp)
+gx$id <- "exp 2"
+plot_dat$gx <- rbind(plot_dat$gx,gx)
+
+p <- ggplot(gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+p
+
+saveRDS(plot_dat,"data/processed/plot_dat.Rds")
+saveRDS(fit_dat,"data/fitting/fit_dat.Rds")
+
+```
+```{r}
+
+
+p <- ggplot(plot_dat$gx,aes(x=day,y=G,color=id))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+p
+
+p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=interaction(label,id)))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))
+p
+
+```
