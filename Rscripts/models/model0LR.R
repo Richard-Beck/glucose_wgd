@@ -4,20 +4,25 @@ library(deSolve)
 mod <- function(Time, State, Pars){
   with(as.list(c(State, Pars)), {
     
-    Sd <- (1-G/(G+Gmin))*tanh(Time*kp)
+    Sd <- (1-(R+G)/((R+G)+Gmin))*tanh(Time*kp)
     Sp <- 1-Sd
+    
+    
+    #dL <- -2*dG ## lactate
+    dR <- -vr*N*R/(R+Rstar) ## glucose
     
     dN <- kp*N*(1-N/theta)*Sp-kd*N*Sd-kbys*N*D/(D+N)
     dD <- kd*N*Sd+kbys*N*D/(D+N)
     dG <- -v*N*G/(G+Gstar)
-    return(list(c(dN,dD,dG)))
+    return(list(c(dN,dD,dG,dR)))
   })
 }
 
 ## wrapper to run ODE model
 run_mod <- function(p0,times,y0){
-  base_y0 <- c(N=1000,D=0,G=5)
-  base_pars<-c(kp=0.1,kd=0.1,kbys=0.1,theta=15000,v=0.00001,Gmin=0.1,Gstar=0.1)
+  base_y0 <- c(N=1000,D=0,G=5,R=10)
+  base_pars<-c(kp=0.1,kd=0.1,kbys=0.1,theta=15000,v=0.00001,Gmin=0.1,Gstar=0.1,
+               vr=0.00001,Rstar=0.1)
   base_pars[names(p0)] <- p0
   base_y0[names(y0)] <- y0
   ode(base_y0, times, mod, base_pars)
@@ -26,9 +31,9 @@ run_mod <- function(p0,times,y0){
 ##info required for running or fitting model
 
 model_info <- function(){
-  parnames <- c("theta", "kp", "kd", "kbys", "v"  , "Gmin", "Gstar")
-  lower <-    c(6000   , 0.01, 0.01, 0.001 , 1e-8 , 0.01  , 0.01)
-  upper <-    c(50000  , 1   , 5   , 1     , 0.001, 20    , 20)
+  parnames <- c("theta", "kp", "kd", "kbys", "v"  , "Gmin", "Gstar","vr" ,"Rstar")
+  lower <-    c(6000   , 0.01, 0.01, 0.001 , 1e-8 , 0.01  , 0.01   ,1e-8 ,0.01)
+  upper <-    c(50000  , 1   , 5   , 1     , 0.001, 20    , 20     ,0.001,20)
   list(parnames=parnames,upper=upper,lower=lower)
 }
 

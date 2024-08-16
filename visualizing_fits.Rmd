@@ -32,6 +32,8 @@ wrap_run_fit <- function(model,ploidy=c("2N","4N"),nshow=10){
     xx <- lapply(1:nshow,function(i){
       pars <- opt[i,]
       names(pars) <- colnames(opt)
+      #pars["ic_R1"] <- log(.0001)
+      #pars["ic_R2"] <- log(.0002)
       pars <- pars[!names(pars)=="value"]
       xi <- masterrun(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=pp)
       xi$bx$rep <- i
@@ -54,7 +56,7 @@ wrap_run_fit <- function(model,ploidy=c("2N","4N"),nshow=10){
   list(bx=bx,gx=gx,cx=cx)
     
 }
-x <- wrap_run_fit(model="0",nshow=1)
+x <- wrap_run_fit(model="0LR",nshow=1)
 
 
 

@@ -206,7 +206,7 @@ fit_full_model <- function(pars,dat,parNames,fixpars=NULL,ploidy="2N",glu_dat=NU
 ## this gets names and ranges for initial value parameters.
 ## Current assumption is every glucose batch has a unique G0 value,
 ## and every experiment/ploidy has a different initial ncells0
-get_ics <- function(dat,ploidy){
+get_ics <- function(dat,ploidy,LR=FALSE){
   ncells1 <- mean(dat$bx1$ncells[dat$bx1$ploidy==ploidy&dat$bx1$day==min(dat$bx1$day)&dat$bx1$label=="alive"])
   ncells2 <- mean(dat$bx2$ncells[dat$bx2$ploidy==ploidy&dat$bx2$day==min(dat$bx2$day)&dat$bx2$label=="alive"])
   gconc1 <- as.numeric(unique(dat$gx1$glucose))
@@ -221,21 +221,32 @@ get_ics <- function(dat,ploidy){
   upper[upper==0] <- 0.01
   lower <- parvals*0.7
   lower[lower==0] <- 0.000001
+  if(LR){
+    parnames <- c("ic_G1","ic_G2",parnames)
+    lower <- c(0.000001,0.000001,lower)
+    upper <- c(5,5,upper)
+  }
   list(parnames=parnames,upper=upper,lower=lower)
 }
 
 unpack_pars <- function(pars){
   icpars <- pars[grepl("ic_",names(pars))]
   pars <- pars[!grepl("ic_",names(pars))]
-  
+
   exp1 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G1_",names(icpars))]))
   exp1$glucose <- sapply(rownames(exp1),function(ri){
     gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
   })
+  if(sum(grepl("_R1",names(icpars)))){
+    exp1$R <- icpars[grepl("_R1",names(icpars))]
+  }
   exp2 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G2_",names(icpars))]))
   exp2$glucose <- sapply(rownames(exp2),function(ri){
     gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
   })
+  if(sum(grepl("_R2",names(icpars)))){
+    exp2$R <- icpars[grepl("_R2",names(icpars))]
+  }
   list(pars=pars,exp1=exp1,exp2=exp2)
 }
 
@@ -246,6 +257,7 @@ err_experiment <- function(par,gs,ics,bx,gx){
     bxi <- bx[bx$glucose==gi,]
     gxi <- gx[gx$glucose==gi,]
     y0 <- c(N=ics$N[i],D=0,G=ics$G[i])
+    if("R"%in%colnames(ics)) y0 <- c(y0,R=ics$R[i])
     times <- seq(0,144,1)
   
     x   <- data.frame(run_mod(par, times, y0))
@@ -295,6 +307,7 @@ run_experiment <- function(par,gs,ics,bx,gx){
     bxi <- bx[bx$glucose==gi,]
     gxi <- gx[gx$glucose==gi,]
     y0 <- c(N=ics$N[i],D=0,G=ics$G[i])
+    if("R"%in%colnames(ics)) y0 <- c(y0,R=ics$R[i])
     times <- seq(0,144,1)
     
     x   <- data.frame(run_mod(par, times, y0))
