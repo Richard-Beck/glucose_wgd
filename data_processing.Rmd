@@ -23,6 +23,67 @@ plot_dat <- list()
 Processing data from first experiment.
 One issue to consider is how we get the standard deviation of the glucose measurements. I think we need to do something more sophisticated than simply take the std.dev of the measurements? With the current approach, I think we are effectively weighting the glucose data from experiment 1 more heavily than that from experiment 2. 
 
+Glucose error approach. 
+Let C, X, and Y respectively be the plated, true, and measured glucose concentrations in the media.
+$X=C+E_p$
+$Y+X+E_m$
+
+
+```{r}
+
+xg <- read.csv("data/raw/220823_Glucose consumption_Sum159_2N_4N.csv")
+colnames(xg)[2:6] <- c(0.1,0.5,1,5,25)
+xg <- reshape2::melt(xg,id.vars=c("rep","day","ploidy"))
+xg$value <- as.numeric(xg$value)
+
+xg$value <- xg$value/18.018
+
+xcalib <- xg[xg$day==0,]
+xcalib <- xcalib[!is.na(xcalib$value)&xcalib$ploidy=="2N",]
+
+X <- xcalib$variable
+Y <- xcalib$value
+
+sdy <- data.frame(aggregate(Y,by=list(X=X),function(i) c(mean(i),sd(i)))$x)
+colnames(sdy) <- c("mean","sd")
+
+```
+
+
+```{r}
+
+
+gx <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                glucose=xg$variable),mean)
+gx$sd <- aggregate(list(G=xg$value),by=list(day=xg$day,
+                                                ploidy=xg$ploidy,
+                                                glucose=xg$variable),sd)$G
+
+## some points have zero std.dev. 
+opt <- lm(sd~G,data=gx)
+
+gx$G[is.na(gx$G)] <- 0.2576315 # mean(runif(10000,0,0.5))
+gx$sd[is.na(gx$sd)] <- 0.14892716 # sd(runif(10000,0,0.5))
+gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$glucose <- as.character(gx$glucose)
+
+gx$Gmin <- gx$G-gx$sd
+gx$Gmax <- gx$G+gx$sd
+
+gx <- gx[,!colnames(gx)=="sd"]
+gx$id <- "exp 1"
+
+
+
+p <- ggplot(gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(ploidy),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))
+p
+
+```
+
 ```{r}
 
 x <- readRDS("data/raw/220823_ilastik_counts.Rds")

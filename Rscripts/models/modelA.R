@@ -99,6 +99,18 @@ run_mixmod <- function(p0,times,y0,G){
   ode(base_y0, times, mixmod, base_pars)
 }
 
+plot_curves <- function(pars,ploidy,G=seq(0.001,1,0.001)){
+  pars <- exp(pars)
+  with(as.list(pars),{
+    df <- data.frame(G,ploidy,
+                     div=kp/(1+(g50a/G)^na),
+                     death=kd*(1-1/(1+(g50d/G)^nd)),
+                     cons=v*(1/(1+(g50c/G)^m)))
+    df$ploidy <- ploidy
+    df <- reshape2::melt(df,id.vars=c("G","ploidy"))
+  })  
+}
+
 ##info required for running or fitting model
 model_info <- function(){
   parnames <- c("kp", "theta", "na", "g50a", "kd", "nd", "g50d", "v"  , "m", "g50c", "g50y", "ky" )

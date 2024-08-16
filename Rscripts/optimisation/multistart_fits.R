@@ -36,10 +36,19 @@ wrap_opt <- function(ploidy,model,Ntrial=100){
 library(parallel)
 ncores <- 70
 Ntrial <- 100
-Nstarts <- 5000
+Nstarts <- 1000
 cl <- makeCluster(getOption("cl.cores", ncores))
 outdir <- "data/fitted_parameters/"
 dir.create(outdir)
+
+opt_2n_0 <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
+                                      fun = wrap_opt, model="0",Ntrial=Ntrial))
+saveRDS(opt_2n_0,file=paste0(outdir,"/opt_2N_0.Rds"))
+
+opt_4n_0 <- do.call(rbind,parLapplyLB(cl,X=rep("4N",Nstarts),
+                                      fun = wrap_opt, model="0",Ntrial=Ntrial))
+saveRDS(opt_4n_0,file=paste0(outdir,"/opt_4N_0.Rds"))
+stop()
 opt_2n_b <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
                                       fun = wrap_opt, model="B",Ntrial=Ntrial))
 saveRDS(opt_2n_b,file=paste0(outdir,"/opt_2N_B.Rds"))

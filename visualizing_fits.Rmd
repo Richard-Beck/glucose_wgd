@@ -22,24 +22,79 @@ gs <- readRDS("data/fitted_parameters/glucose_struct.Rds")
 ```
 
 ```{r}
-wrap_run_fit <- function(model,ploidy=c("2N","4N")){
+wrap_run_fit <- function(model,ploidy=c("2N","4N"),nshow=10){
   source(paste0("Rscripts/models/model",model,".R"))
   x <- lapply(ploidy,function(pp){
     opt <- readRDS(paste0("data/fitted_parameters/opt_",pp,"_",model,".Rds"))
-    pars <- opt[opt[,"value"]==min(opt[,"value"])]
-    names(pars) <- colnames(opt)
-    pars <- pars[!names(pars)=="value"]
-    xi <- masterrun(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=pp)
+    v <- opt[,"value"]
+    opt <- opt[order(v),]
+    opt <- head(opt,nshow)
+    xx <- lapply(1:nshow,function(i){
+      pars <- opt[i,]
+      names(pars) <- colnames(opt)
+      pars <- pars[!names(pars)=="value"]
+      xi <- masterrun(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=pp)
+      xi$bx$rep <- i
+      xi$gx$rep <- i
+      xi$cx$rep <- i
+      xi
+    })
+      bx <- do.call(rbind,lapply(xx,function(xi) xi$bx))
+  gx <- do.call(rbind,lapply(xx,function(xi) xi$gx))
+  cx <- do.call(rbind,lapply(xx,function(xi) xi$cx))
+  
+  list(bx=bx,gx=gx,cx=cx)
+  
   })
   
   bx <- do.call(rbind,lapply(x,function(xi) xi$bx))
   gx <- do.call(rbind,lapply(x,function(xi) xi$gx))
-  list(bx=bx,gx=gx)
+  cx <- do.call(rbind,lapply(x,function(xi) xi$cx))
+  
+  list(bx=bx,gx=gx,cx=cx)
     
 }
-x <- wrap_run_fit(model="B")
+x <- wrap_run_fit(model="0",nshow=1)
 
 
+
+p <- ggplot(plot_dat$gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))+
+  geom_line(data=x$gx,aes(group=rep))
+p
+
+p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=x$bx,aes(group=interaction(label,rep)))
+p
+
+pc <- ggplot(x$cx,aes(x=G,y=value,color=ploidy))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line(aes(group=interaction(ploidy,rep)))+
+  scale_x_log10()
+pc
+
+```
+```{r}
+
+model <- "A"
+ploidy <- "4N"
+source(paste0("Rscripts/models/model",model,".R"))
+opt <- readRDS(paste0("data/fitted_parameters/opt_",ploidy,"_",model,".Rds"))
+v <- opt[,"value"]
+opt <- opt[order(v),]
+e0 <- min(v)
+pars <- opt[1,]
+names(pars) <- colnames(opt)
+pars <- pars[!names(pars)=="value"]
+pars["theta"] <- 9
+x <- masterrun(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=ploidy)
+err <- masterfit(pars,dat = fit_dat,parNames = names(pars),gs = gs,ploidy=ploidy)
+err
 
 p <- ggplot(plot_dat$gx,aes(x=day,y=G))+
   facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
@@ -54,5 +109,13 @@ p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=label))+
   geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
   geom_line(data=x$bx)
 p
+
+pc <- ggplot(x$cx,aes(x=G,y=value,color=ploidy))+
+  facet_grid(rows=vars(variable),scales="free")+
+  geom_line()+
+  scale_x_log10()
+pc
+
+print(c(err,e0))
 
 ```

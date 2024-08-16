@@ -360,6 +360,7 @@ masterrun <- function(pars,dat,parNames,gs,ploidy="2N"){
   gx<-rbind(x1$gx,x2$gx)
   bx$ploidy <- ploidy
   gx$ploidy <- ploidy
-  x <- list(bx=bx,gx=gx)
+  cx <- plot_curves(log(pars$pars),ploidy = ploidy)
+  x <- list(bx=bx,gx=gx,cx=cx)
   return(x)
 }

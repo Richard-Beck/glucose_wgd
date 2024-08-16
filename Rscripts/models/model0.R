@@ -4,7 +4,7 @@ library(deSolve)
 mod <- function(Time, State, Pars){
   with(as.list(c(State, Pars)), {
     
-    Sd <- (1-G/(G+Gmin))*tanh(Time)
+    Sd <- (1-G/(G+Gmin))*tanh(Time*kp)
     Sp <- 1-Sd
     
     dN <- kp*N*(1-N/theta)*Sp-kd*N*Sd-kbys*N*D/(D+N)
@@ -26,10 +26,10 @@ run_mod <- function(p0,times,y0){
 ##info required for running or fitting model
 
 model_info <- function(){
-  parnames <- c("theta", "kp", "kd", "kbys", "v"  , "Gmin", "Gstar","N" , "D")
-  lower <-    c(6000   , 0.01, 0.01, 0.001 , 1e-8 , 0.01  , 0.01   ,100 , 100)
-  upper <-    c(50000  , 1   , 5   , 1     , 0.001, 20    , 20     ,1000, 1000)
+  parnames <- c("theta", "kp", "kd", "kbys", "v"  , "Gmin", "Gstar")
+  lower <-    c(6000   , 0.01, 0.01, 0.001 , 1e-8 , 0.01  , 0.01)
+  upper <-    c(50000  , 1   , 5   , 1     , 0.001, 20    , 20)
   list(parnames=parnames,upper=upper,lower=lower)
 }
 
-
+plot_curves <- function(pars,ploidy) return(NULL)
