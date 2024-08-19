@@ -42,11 +42,11 @@ outdir <- "data/fitted_parameters/"
 dir.create(outdir)
 
 opt_2n_0LR <- do.call(rbind,parLapplyLB(cl,X=rep("2N",Nstarts),
-                                      fun = wrap_opt, model="0LR",Ntrial=Ntrial))
+                                      fun = wrap_opt, model="0LR",Ntrial=Ntrial,LR=TRUE))
 saveRDS(opt_2n_0LR,file=paste0(outdir,"/opt_2N_0LR.Rds"))
 
 opt_4n_0LR <- do.call(rbind,parLapplyLB(cl,X=rep("4N",Nstarts),
-                                      fun = wrap_opt, model="0LR",Ntrial=Ntrial))
+                                      fun = wrap_opt, model="0LR",Ntrial=Ntrial,LR=TRUE))
 saveRDS(opt_4n_0LR,file=paste0(outdir,"/opt_4N_0LR.Rds"))
 stop()
 
