@@ -222,7 +222,7 @@ get_ics <- function(dat,ploidy,LR=FALSE){
   lower <- parvals*0.7
   lower[lower==0] <- 0.000001
   if(LR){
-    parnames <- c("ic_G1","ic_G2",parnames)
+    parnames <- c("ic_R1","ic_R2",parnames)
     lower <- c(0.000001,0.000001,lower)
     upper <- c(5,5,upper)
   }

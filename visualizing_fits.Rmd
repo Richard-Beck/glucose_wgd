@@ -56,7 +56,7 @@ wrap_run_fit <- function(model,ploidy=c("2N","4N"),nshow=10){
   list(bx=bx,gx=gx,cx=cx)
     
 }
-x <- wrap_run_fit(model="0LR",nshow=1)
+x <- wrap_run_fit(model="0LR",nshow=10)
 
 
 
