@@ -56,7 +56,7 @@ wrap_run_fit <- function(model,ploidy=c("2N","4N"),nshow=10){
   list(bx=bx,gx=gx,cx=cx)
     
 }
-x <- wrap_run_fit(model="0LR",nshow=10)
+x <- wrap_run_fit(model="0LR",nshow=1)
 
 
 
@@ -81,6 +81,106 @@ pc <- ggplot(x$cx,aes(x=G,y=value,color=ploidy))+
 pc
 
 ```
+Manually playing with some of the parameters:
+```{r}
+
+pars <- c(
+  theta = 30384.048, 
+  kp = 0.029, 
+  kd = 0.000685115, 
+  kbys = 0.09219202, 
+  v = 0.00002688483, 
+  Gmin = 0.1137606, 
+  Gstar = 0.1505786, 
+  vr = 0.0009843073, 
+  Rstar = 0.5252578, 
+  kdl = 0.07830151, 
+  L50 = 25.288861, 
+  ic_R1 = 1.478189, 
+  ic_R2 = .905994, 
+  ic_N1 = 500, 
+  ic_N2 = 555.7389, 
+  ic_G1_0p1 = 0.01082134, 
+  ic_G1_0p5 = 0.4632757, 
+  ic_G1_1 = 1.387892, 
+  ic_G1_5 = 5.487328, 
+  ic_G1_25 = 23.70985, 
+  ic_G2_0 = 0, 
+  ic_G2_0p1 = 0.1031025, 
+  ic_G2_0p25 = 0.3160560, 
+  ic_G2_0p5 = 0.6704100, 
+  ic_G2_1 = 1.585557
+)
+
+
+x <- masterrun(log(pars),dat = fit_dat,parNames = names(pars),gs = gs,ploidy="2N")
+f <- masterfit(log(pars),dat = fit_dat,parNames = names(pars),gs = gs,ploidy="2N",verbose=T)
+
+p <- ggplot(plot_dat$gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))+
+  geom_line(data=x$gx)
+p
+
+p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=x$bx,aes(group=label))
+p
+
+```
+```{r}
+
+pars <- c(
+  theta = 30384.048, 
+  kp = 0.035, 
+  kd = 0.000685115, 
+  kbys = 0.09219202, 
+  v = 0.00002688483, 
+  Gmin = 0.1137606, 
+  Gstar = 0.1505786, 
+  vr = 0.0009843073, 
+  Rstar = 0.5252578, 
+  kdl = 0.07830151, 
+  L50 = 25.288861, 
+  ic_R1 = 1.478189, 
+  ic_R2 = .905994, 
+  ic_N1 = 500, 
+  ic_N2 = 400, 
+  ic_G1_0p1 = 0.01082134, 
+  ic_G1_0p5 = 0.4632757, 
+  ic_G1_1 = 1.387892, 
+  ic_G1_5 = 5.487328, 
+  ic_G1_25 = 23.70985, 
+  ic_G2_0 = 0, 
+  ic_G2_0p1 = 0.1031025, 
+  ic_G2_0p25 = 0.3160560, 
+  ic_G2_0p5 = 0.6704100, 
+  ic_G2_1 = 1.585557
+)
+
+
+x <- masterrun(log(pars),dat = fit_dat,parNames = names(pars),gs = gs,ploidy="4N")
+f <- masterfit(log(pars),dat = fit_dat,parNames = names(pars),gs = gs,ploidy="4N",verbose=T)
+
+p <- ggplot(plot_dat$gx,aes(x=day,y=G))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=Gmin,ymax=Gmax))+
+  geom_line(data=x$gx)
+p
+
+p <- ggplot(plot_dat$bx,aes(x=day,y=ncells,color=label))+
+  facet_grid(cols=vars(interaction(ploidy,id)),rows=vars(glucose),scales="free")+
+  geom_point()+
+  geom_errorbar(aes(ymin=ncells-sd,ymax=ncells+sd))+
+  geom_line(data=x$bx,aes(group=label))
+p
+
+```
+
 ```{r}
 
 model <- "A"

@@ -240,7 +240,7 @@ unpack_pars <- function(pars){
   if(sum(grepl("_R1",names(icpars)))){
     exp1$R <- icpars[grepl("_R1",names(icpars))]
   }
-  exp2 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G2_",names(icpars))]))
+  exp2 <- data.frame(cbind(N=icpars[grepl("_N2",names(icpars))],G=icpars[grepl("G2_",names(icpars))]))
   exp2$glucose <- sapply(rownames(exp2),function(ri){
     gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
   })
@@ -250,7 +250,7 @@ unpack_pars <- function(pars){
   list(pars=pars,exp1=exp1,exp2=exp2)
 }
 
-err_experiment <- function(par,gs,ics,bx,gx){
+err_experiment <- function(par,gs,ics,bx,gx,verbose=FALSE){
   
   errs <- tryCatch(sapply(1:nrow(ics),function(i){
     gi <- ics$glucose[i]
@@ -292,6 +292,11 @@ err_experiment <- function(par,gs,ics,bx,gx){
     ll <- c(bx_errs,gx_errs)
     ll[is.na(ll)] <- 10^11
     ll <- sum(ll)
+    if(verbose){
+      print(paste(ics[i,],collapse=" "))
+      print(paste("cell error:",sum(bx_errs)))
+      print(paste("glucose error:",sum(gx_errs)))
+    }
     return(ll)
   }),error=function(e) return(10^11),
   warning = function(w) return(10^9))
@@ -337,17 +342,17 @@ run_experiment <- function(par,gs,ics,bx,gx){
   return(list(bx=bx,gx=gx))
 }
 
-masterfit <- function(pars,dat,parNames,gs,ploidy="2N"){
+masterfit <- function(pars,dat,parNames,gs,ploidy="2N",verbose=F){
   
   pars <- exp(pars)
   names(pars) <- parNames
   pars <- unpack_pars(pars)
   err1 <- err_experiment(par = pars$pars,gs,ics=pars$exp1,
                          bx=dat$bx1[dat$bx1$ploidy==ploidy,],
-                         gx=dat$gx1[dat$gx1$ploidy==ploidy,])
+                         gx=dat$gx1[dat$gx1$ploidy==ploidy,],verbose=verbose)
   err2 <- err_experiment(par=pars$pars,gs,ics=pars$exp2,
                          bx=dat$bx2[dat$bx2$ploidy==ploidy,],
-                         gx=dat$gx2[dat$gx2$ploidy==ploidy,])
+                         gx=dat$gx2[dat$gx2$ploidy==ploidy,],verbose=verbose)
   
   print(paste0("exp1 err: ",err1))
   print(paste0("exp2 err: ",err2))

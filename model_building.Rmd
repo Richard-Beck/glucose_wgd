@@ -12,6 +12,24 @@ knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyMod
 
 ```{r}
 
+x <- readRDS("data/processed/plot_dat.Rds")
+bx <- x$bx
+gx <- x$gx
+
+bx <- bx[bx$day%in%gx$day&bx$label=="alive",]
+
+y <- merge(gx,bx,by=c("glucose","day","ploidy","id"))
+
+p <- ggplot(y,aes(x=G,y=G/ncells))+
+  facet_grid(rows=vars(ploidy),cols=vars(id),scales="free")+
+  geom_point()+
+  scale_y_log10()
+p
+```
+
+
+```{r}
+
 source("Rscripts/models/model0.R")
 
 x <- readRDS("data/fitting/fit_dat.Rds")
