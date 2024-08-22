@@ -92,10 +92,10 @@ writecon <- paste0(outdir,"opt_1LR.csv")
 init_file(writecon,model="1LR",LR=T)
 opt_1LR <- do.call(rbind,parLapplyLB(cl,X=rep("1LR",Nstarts),
                                       fun = wrap_opt, writecon=writecon,Ntrial=Ntrial,LR=TRUE))
-saveRDS(opt_1LR,file="opt_1LR.Rds")
+saveRDS(opt_1LR,file=paste0(outdir,"opt_1LR.Rds"))
 
 writecon <- paste0(outdir,"opt_0LR.csv")
 init_file(writecon,model="0LR",LR=T)
 opt_0LR <- do.call(rbind,parLapplyLB(cl,X=rep("0LR",Nstarts),
                                      fun = wrap_opt, writecon=writecon,Ntrial=Ntrial,LR=TRUE))
-saveRDS(opt_0LR,file="opt_1LR.Rds")
+saveRDS(opt_0LR,file=paste0(outdir,"opt_0LR.Rds"))

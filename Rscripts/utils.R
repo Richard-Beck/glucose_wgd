@@ -466,6 +466,7 @@ split_ploidy_pars <- function(pars){
 }
 
 masterfit_all <- function(pars,dat,parNames,gs,verbose=F){
+  names(pars) <- parNames
   pars <- split_ploidy_pars(pars)
   err2N <- masterfit(pars$par2N,dat,parNames=names(pars$par2N),gs,ploidy="2N",verbose=verbose)
   err4N <- masterfit(pars$par4N,dat,parNames=names(pars$par2N),gs,ploidy="4N",verbose=verbose)
@@ -473,6 +474,7 @@ masterfit_all <- function(pars,dat,parNames,gs,verbose=F){
 }
 
 masterrun_all <- function(pars,dat,parNames,gs,verbose=F){
+  names(pars) <- parNames
   pars <- split_ploidy_pars(pars)
   x2 <- masterrun(pars$par2N,dat,parNames,gs,ploidy="2N")
   x4 <- masterrun(pars$par4N,dat,parNames,gs,ploidy="4N")
