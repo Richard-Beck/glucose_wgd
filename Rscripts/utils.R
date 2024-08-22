@@ -228,11 +228,42 @@ get_ics <- function(dat,ploidy,LR=FALSE){
   }
   list(parnames=parnames,upper=upper,lower=lower)
 }
+## same as get_ics but don't care about ploidy
+get_ics_all <- function(dat,LR=FALSE){
+  ncells1 <- mean(dat$bx1$ncells[dat$bx1$day==min(dat$bx1$day)&dat$bx1$label=="alive"])
+  ncells2 <- mean(dat$bx2$ncells[dat$bx2$day==min(dat$bx2$day)&dat$bx2$label=="alive"])
+  gconc1 <- as.numeric(unique(dat$gx1$glucose))
+  gconc2 <- as.numeric(unique(dat$gx2$glucose))
+  
+  parnames <- c(paste0("ic_",c("N1","N2")),
+                paste0("ic_",c(paste0("G1_",gsub("[.]","p",gconc1)),
+                               paste0("G2_",gsub("[.]","p",gconc2)))))
+  
+  parvals <- c(ncells1,ncells2,gconc1,gconc2)
+  upper <- parvals*1.3
+  upper[upper==0] <- 0.01
+  lower <- parvals*0.7
+  lower[lower==0] <- 0.000001
+  if(LR){
+    parnames <- c("ic_R1","ic_R2",parnames)
+    lower <- c(0.000001,0.000001,lower)
+    upper <- c(5,5,upper)
+  }
+  list(parnames=parnames,upper=upper,lower=lower)
+}
 
 unpack_pars <- function(pars){
   icpars <- pars[grepl("ic_",names(pars))]
   pars <- pars[!grepl("ic_",names(pars))]
-
+  espars <- pars[grepl("es_exp",names(pars))]
+  pars <- pars[!grepl("es_exp",names(pars))]
+  es_parnames <- sapply(names(espars),function(ii) tail(unlist(strsplit(ii,split="_")),1))
+  exp1pars <- grepl("exp1",names(espars))
+  names(espars) <- es_parnames
+  pars1 <- c(pars,espars[exp1pars])
+  pars2 <- c(pars,espars[!exp1pars])
+  
+  
   exp1 <- data.frame(cbind(N=icpars[grepl("_N1",names(icpars))],G=icpars[grepl("G1_",names(icpars))]))
   exp1$glucose <- sapply(rownames(exp1),function(ri){
     gsub("p",".",tail(unlist(strsplit(ri,split="_")),1))
@@ -247,10 +278,10 @@ unpack_pars <- function(pars){
   if(sum(grepl("_R2",names(icpars)))){
     exp2$R <- icpars[grepl("_R2",names(icpars))]
   }
-  list(pars=pars,exp1=exp1,exp2=exp2)
+  list(pars1=pars1,pars2=pars2,exp1=exp1,exp2=exp2)
 }
 
-err_experiment <- function(par,gs,ics,bx,gx,verbose=FALSE){
+err_experiment <- function(par,gs,ics,bx,gx,verbose=FALSE,individual_values=F){
   
   errs <- tryCatch(sapply(1:nrow(ics),function(i){
     gi <- ics$glucose[i]
@@ -291,6 +322,7 @@ err_experiment <- function(par,gs,ics,bx,gx,verbose=FALSE){
     
     ll <- c(bx_errs,gx_errs)
     ll[is.na(ll)] <- 10^11
+    if(individual_values) return(ll)
     ll <- sum(ll)
     if(verbose){
       print(paste(ics[i,],collapse=" "))
@@ -300,7 +332,7 @@ err_experiment <- function(par,gs,ics,bx,gx,verbose=FALSE){
     return(ll)
   }),error=function(e) return(10^11),
   warning = function(w) return(10^9))
-  
+  if(individual_values) return(errs)
   res <- sum(errs)
   return(res)
 }
@@ -317,6 +349,37 @@ run_experiment <- function(par,gs,ics,bx,gx){
     
     x   <- data.frame(run_mod(par, times, y0))
     colnames(x)[1:4] <- c("day","N","D","G")
+    ###CALCULATE ERRS
+    ya <- x$N[x$day%in%(bxi$day[bxi$label=="alive"]*24)]
+    yd <- x$D[x$day%in%(bxi$day[bxi$label=="dead"]*24)]
+    
+    xa <- bxi$ncells[bxi$label=="alive"]
+    xd <- bxi$ncells[bxi$label=="dead"]
+    
+    sda <- bxi$sd[bxi$label=="alive"]
+    sdd <- bxi$sd[bxi$label=="dead"]
+    
+    xx <- c(xa,xd)
+    yy <- c(ya,yd)
+    sdx <- c(sda,sdd)
+    
+    bx_errs <- (xx-yy)^2/sdx^2
+    gx_errs <- 0
+    
+    if("G"%in%colnames(gxi)){ ## fitting experiment 1
+      yg <- x$G[x$day%in%(gxi$day*24)]
+      gx_errs <- (yg-gxi$G)^2/gxi$sd^2
+    }
+    if("lum"%in%colnames(gxi)){##fitting to experiment 2
+      logf <- log(gxi$lum)
+      yg <- x$G[x$day%in%(gxi$day*24)]
+      gx_errs <- -gs$pg(glu = yg/gxi$dilution,lum = gxi$lum,gpar = gs$gpar,aslog=T)
+      
+    }
+    gx_errs=sum(gx_errs)
+    bx_errs = sum(bx_errs)
+    ###
+    
     x$day <- x$day/24
     
     bx_alive <- x[,c("day","N")]
@@ -327,9 +390,11 @@ run_experiment <- function(par,gs,ics,bx,gx){
     colnames(bx_dead)[2] <- "ncells"
     bxi <- rbind(bx_alive,bx_dead)
     bxi$glucose <- gi
+    bxi$err <- bx_errs
     
     gxi <- x[,c("day","G")]
     gxi$glucose <- gi
+    gxi$err <- gx_errs
     
     return(list(gx=gxi,bx=bxi))
     
@@ -347,10 +412,10 @@ masterfit <- function(pars,dat,parNames,gs,ploidy="2N",verbose=F){
   pars <- exp(pars)
   names(pars) <- parNames
   pars <- unpack_pars(pars)
-  err1 <- err_experiment(par = pars$pars,gs,ics=pars$exp1,
+  err1 <- err_experiment(par = pars$pars1,gs,ics=pars$exp1,
                          bx=dat$bx1[dat$bx1$ploidy==ploidy,],
                          gx=dat$gx1[dat$gx1$ploidy==ploidy,],verbose=verbose)
-  err2 <- err_experiment(par=pars$pars,gs,ics=pars$exp2,
+  err2 <- err_experiment(par=pars$pars2,gs,ics=pars$exp2,
                          bx=dat$bx2[dat$bx2$ploidy==ploidy,],
                          gx=dat$gx2[dat$gx2$ploidy==ploidy,],verbose=verbose)
   
@@ -359,17 +424,18 @@ masterfit <- function(pars,dat,parNames,gs,ploidy="2N",verbose=F){
   return(err1+err2)
 }
 
+
 masterrun <- function(pars,dat,parNames,gs,ploidy="2N"){
   
   pars <- exp(pars)
   names(pars) <- parNames
   pars <- unpack_pars(pars)
-  x1 <- run_experiment(par = pars$pars,gs,ics=pars$exp1,
+  x1 <- run_experiment(par = pars$pars1,gs,ics=pars$exp1,
                          bx=dat$bx1[dat$bx1$ploidy==ploidy,],
                          gx=dat$gx1[dat$gx1$ploidy==ploidy,])
   x1$bx$id <- "exp 1"
   x1$gx$id <- "exp 1"
-  x2 <- run_experiment(par=pars$pars,gs,ics=pars$exp2,
+  x2 <- run_experiment(par=pars$pars2,gs,ics=pars$exp2,
                          bx=dat$bx2[dat$bx2$ploidy==ploidy,],
                          gx=dat$gx2[dat$gx2$ploidy==ploidy,])
   x2$bx$id <- "exp 2"
@@ -378,7 +444,39 @@ masterrun <- function(pars,dat,parNames,gs,ploidy="2N"){
   gx<-rbind(x1$gx,x2$gx)
   bx$ploidy <- ploidy
   gx$ploidy <- ploidy
-  cx <- plot_curves(log(pars$pars),ploidy = ploidy)
+  cx <- plot_curves(log(pars$pars1),ploidy = ploidy)
   x <- list(bx=bx,gx=gx,cx=cx)
+  return(x)
+}
+
+split_ploidy_pars <- function(pars){
+  par2N <- pars[grepl("p2N_",names(pars))]
+  names(par2N) <- sapply(names(par2N),function(i){
+    paste(unlist(strsplit(i,split="_"))[-1],collapse="_")
+  })
+  par4N <- pars[grepl("p4N_",names(pars))]
+  names(par4N) <- sapply(names(par4N),function(i){
+    paste(unlist(strsplit(i,split="_"))[-1],collapse="_")
+  })
+  shared_pars <- pars[!(grepl("p2N_",names(pars)) | grepl("p4N_",names(pars)))]
+  
+  pars <- list(par2N=c(par2N,shared_pars),
+               par4N=c(par4N,shared_pars))
+  return(pars)
+}
+
+masterfit_all <- function(pars,dat,parNames,gs,verbose=F){
+  pars <- split_ploidy_pars(pars)
+  err2N <- masterfit(pars$par2N,dat,parNames=names(pars$par2N),gs,ploidy="2N",verbose=verbose)
+  err4N <- masterfit(pars$par4N,dat,parNames=names(pars$par2N),gs,ploidy="4N",verbose=verbose)
+  err2N + err4N
+}
+
+masterrun_all <- function(pars,dat,parNames,gs,verbose=F){
+  pars <- split_ploidy_pars(pars)
+  x2 <- masterrun(pars$par2N,dat,parNames,gs,ploidy="2N")
+  x4 <- masterrun(pars$par4N,dat,parNames,gs,ploidy="4N")
+  
+  x <- list(bx=rbind(x2$bx,x4$bx),gx=rbind(x2$gx,x4$gx),cx=rbind(x2$cx,x4$cx))
   return(x)
 }

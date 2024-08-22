@@ -44,6 +44,9 @@ xcalib <- xcalib[!is.na(xcalib$value)&xcalib$ploidy=="2N",]
 X <- xcalib$variable
 Y <- xcalib$value
 
+opt0 <- lm(Y~X)
+sd0 <- sd(predict(opt0)-Y)
+
 sdy <- data.frame(aggregate(Y,by=list(X=X),function(i) c(mean(i),sd(i)))$x)
 colnames(sdy) <- c("mean","sd")
 
@@ -64,8 +67,9 @@ gx$sd <- aggregate(list(G=xg$value),by=list(day=xg$day,
 opt <- lm(sd~G,data=gx)
 
 gx$G[is.na(gx$G)] <- 0.2576315 # mean(runif(10000,0,0.5))
-gx$sd[is.na(gx$sd)] <- 0.14892716 # sd(runif(10000,0,0.5))
-gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$sd[is.na(gx$sd)] <- 0#0.14892716 # sd(runif(10000,0,0.5))
+#gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$sd <- sqrt(gx$sd^2+sd0^2)
 gx$glucose <- as.character(gx$glucose)
 
 gx$Gmin <- gx$G-gx$sd
@@ -120,8 +124,9 @@ gx$sd <- aggregate(list(G=xg$value),by=list(day=xg$day,
 opt <- lm(sd~G,data=gx)
 
 gx$G[is.na(gx$G)] <- 0.2576315 # mean(runif(10000,0,0.5))
-gx$sd[is.na(gx$sd)] <- 0.14892716 # sd(runif(10000,0,0.5))
-gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$sd[is.na(gx$sd)] <- 0#0.14892716 # sd(runif(10000,0,0.5))
+#gx$sd[gx$sd==0] <- predict(opt,gx)[gx$sd==0]
+gx$sd <- sqrt(gx$sd^2+sd0^2)
 gx$glucose <- as.character(gx$glucose)
 fit_dat$gx1 <- gx
 

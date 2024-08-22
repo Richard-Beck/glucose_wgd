@@ -10,21 +10,301 @@ knitr::opts_knit$set(root.dir="C:/Users/4473331/Documents/projects/006_ploidyMod
 ```
 
 
+SINGLE CELL MODEL
+
 ```{r}
 
-x <- readRDS("data/processed/plot_dat.Rds")
-bx <- x$bx
-gx <- x$gx
+solve_Gi <- function(params) {
+  # Extract parameters from the named vector
+  V_g <- params["vg"]
+  G_o <- params["Go"]
+  K_g <- params["kg"]
+  V_f <- params["vf"]
+  K_f <- params["kf"]
+  V_b <- params["vb"]
+  K_b <- params["kb"]
+  
+  # Define the function whose root we need to find
+  equation <- function(G_i) {
+    left_side <- V_g * (G_o - G_i) / (K_g + G_o + G_i)
+    right_side <- (V_f * G_i / (K_f + G_i)) + (V_b * G_i / (K_b + G_i))
+    return(left_side - right_side)
+  }
+  
+  # Use uniroot to find the root (G_i) of the equation
+  Gi_solution <- uniroot(equation, lower = 0, upper = G_o)$root
+  
+  return(Gi_solution)
+}
 
-bx <- bx[bx$day%in%gx$day&bx$label=="alive",]
+optim_par <- function(par){
+  par <- abs(par)
+  p1 <- c(par,Go=25)
+  p2 <- c(par,Go=5)
+  Gi1 <- solve_Gi(p1)
+  Gi2 <- solve_Gi(p2)
+  
+  err <- (Gi1-Gi2)^2/(Gi1+Gi2)^2
+  err
+}
 
-y <- merge(gx,bx,by=c("glucose","day","ploidy","id"))
+# Example usage:
+params <- c(kg = 0.5,kb=0.1,kf=0.01,
+          vg = 1,vb=0.9, vf=0.1,Go=25 )
+Gi <- solve_Gi(params)
+print(Gi)
 
-p <- ggplot(y,aes(x=G,y=G/ncells))+
-  facet_grid(rows=vars(ploidy),cols=vars(id),scales="free")+
-  geom_point()+
-  scale_y_log10()
+p0 <- c(kg = 0.5,kb=0.1,kf=0.01,
+          vg = 1,vb=0.9, vf=0.1)
+
+opt <- optim(p0,fn=optim_par)
+par <- abs(opt$par)
+p1 <- c(par,Go=25)
+p2 <- c(par,Go=5)
+Gi1 <- solve_Gi(p1)
+Gi2 <- solve_Gi(p2)
+
+```
+
+```{r}
+
+mod <- function(Time, State, Pars){
+  with(as.list(c(State, Pars)), {
+    Rin <- vg*(Go-Gi)/(kg+Go+Gi)
+    Rf <- vf*G6p/(kf+G6p)
+    Rb <- G6p*vb/(kb+G6p)
+    dGo <- -Rin*consume
+    dGi <- Rin-kp*Gi
+    dG6p <- kp*Gi-Rf-Rb
+    dB <- Rb*consume
+    return(list(c(dGo,dGi,dG6p,dB)))
+  })
+}
+
+mm <- function(pars,df){
+  pred <- pars[1]/(1+(pars[2]/df$Go)^pars[3])
+  return(pred)
+}
+wrap_mm <- function(pars,df){
+  pred <- mm(pars,df)
+  sum((pred-df$Rb)^2)
+}
+
+pars <- c(kg = 0.5,kb=1,kf=0.1,
+          vg = .05,vb=.045, vf=.005,kp=.2,consume=1)
+
+y0 <- c(Go=25,Gi=1,G6p=0,B=0)
+times <- seq(0,1000,1)
+
+parsteady <- pars
+parsteady["consume"] <- 0
+library(rootSolve)
+yss <- runsteady(y=y0,func=mod,parms=parsteady)
+out <- ode(y=yss$y,times,mod,pars)
+plot(out)
+df <- data.frame(out)
+df$Rb <- df$G6p*(pars["vg"]-pars["vf"])/(pars["kb"]+df$G6p)
+
+p0 <- c(0.9,0.1,1)
+opt <- optim(p0,wrap_mm,df=df)
+df$predRb <- mm(opt$par,df)
+
+p <- ggplot(df,aes(x=Go,y=Rb))+
+  geom_line()+
+  geom_line(aes(y=predRb,color="pred"))+
+  scale_x_log10(limits=c(0.000000000001,25))
 p
+## Assume Gin is conver
+
+
+
+```
+
+```{r}
+
+
+est_dcells <- function(xx,celltype="alive"){
+  xx$bx <- xx$bx[xx$bx$label==celltype,]
+  dn <- diff(xx$bx$ncells)
+  dn <- c(NaN,zoo::rollmean(dn,k=2),NaN)
+  xx$bx$dn <- dn/diff(xx$bx$day)[1]
+  merge(xx$bx,xx$gx,by=c("day","ploidy","glucose"))
+}
+
+get_dg <- function(xx){
+  
+  xx$gx <- xx$gx[order(xx$gx$day),]
+  xx$gx$backdiff <- c(NaN,diff(xx$gx$G))
+  xx$gx$fordiff <- c(diff(xx$gx$G),NaN)
+  return(xx)
+}
+
+mm <- function(pars,dat){
+    rmax <- pars[1]
+    g50 <- pars[2]
+    n <- pars[3]
+    est <- rmax*(1-dat$G^n/(dat$G^n+g50^n))
+    if(dat$variable[1]=="da") est <-  rmax*(dat$G^n/(dat$G^n+g50^n))
+    return(est)
+}
+
+fit_mm <- function(pars,dat){
+  rmax <- pars[1]
+  g50 <- pars[2]
+  n <- pars[3]
+  est <- rmax*(1-dat$G^n/(dat$G^n+g50^n))
+  if(dat$variable[1]=="da") est <-  rmax*(dat$G^n/(dat$G^n+g50^n))
+  sum((est-dat$value)^2)
+}
+
+mmg <- function(pars,mg){
+  n <- pars[2]
+  g50 <- pars[3]
+  res <- pars[1]*mg$ncells*mg$G^n/(mg$G^n+g50^n)
+  res
+}
+
+mmg2 <- function(pars,G){
+  n <- pars[2]
+  g50 <- pars[3]
+  res <- -pars[1]*G^n/(G^n+g50^n)
+  data.frame(G,C=res)
+}
+
+fit_mmg <- function(pars,mg){
+  res <- mmg(pars,mg)
+  sum((res-mg$dG))^2
+}
+
+
+xn <- readRDS("data/processed/plot_dat.Rds")
+xn$bx <- xn$bx[xn$bx$id=="exp 2",]
+xn$gx <- xn$gx[xn$gx$id=="exp 2",]
+
+bx <- split(xn$bx,f=interaction(xn$bx$ploidy,
+                                xn$bx$glucose,
+                                xn$bx$id))
+gx <- xn$gx
+
+bx <- bx[sapply(bx,nrow)!=0]
+xn <- lapply(bx, function(bxi){
+  xni <- list(bx=bxi,gx=gx[gx$ploidy==bxi$ploidy[1]&
+                             gx$glucose==bxi$glucose[1]&
+                             gx$id==bxi$id[1],])
+})
+
+
+
+has_glucose <- sapply(xn,function(xni) !is.null(xni$gx))
+xn <- xn[has_glucose]
+xn <- lapply(xn,get_dg)
+
+mg <- do.call(rbind,lapply(xn,function(xni){
+  merge(xni$bx,xni$gx,by=c("day","ploidy","glucose"))
+}))
+mg$dG <- apply(mg[,c("backdiff","fordiff")],1,mean,na.rm=T)
+
+mg2 <- mg[mg$label=="alive" & mg$ploidy=="2N",]
+mg2$nG <- mg2$G*mg2$ncells
+mg4 <- mg[mg$label=="alive" & mg$ploidy=="4N",]
+mg4$nG <- mg4$G*mg4$ncells
+
+pars <- c(0.001,1,0.01)
+
+fmg2 <- optim(pars,fit_mmg,mg=mg2)
+fmg4 <- optim(pars,fit_mmg,mg=mg4)
+
+pars2N <- fmg2$par
+names(pars2N) <- c("kg","ng","g50c")
+pars4N <- fmg4$par
+names(pars4N) <- c("kg","ng","g50c")
+
+mg2$pred <- mmg(fmg2$par,mg2)
+mg4$pred <- mmg(fmg4$par,mg4)
+
+dfg <- rbind(mg2,mg4)
+
+gpred1 <- cbind(mmg2(pars2N,G=exp(seq(0,2,0.01))),ploidy="2N")
+
+gpred <- rbind(cbind(mmg2(pars2N,G=exp(seq(-10,2,0.1))),ploidy="2N"),
+               cbind(mmg2(pars4N,G=exp(seq(-10,2,0.1))),ploidy="4N"))
+
+dfgplt <- data.frame(G=dfg$G,C=-dfg$dG/dfg$ncells,ploidy=dfg$ploidy)
+
+p <- ggplot(gpred,aes(x=G,y=C))+
+  facet_grid(cols=vars(ploidy))+
+  geom_line()+
+  geom_point(data=dfgplt)+
+  scale_x_log10("ncells*Glucose")+
+  scale_y_continuous("glucose uptake")
+p
+
+xa <- do.call(rbind,lapply(xn,est_dcells,celltype="alive"))
+xd <- do.call(rbind,lapply(xn,est_dcells,celltype="dead"))
+
+if(mean(xa$G!=xd$G)) stop("out of expected order!")
+
+dd <- xd$dn/xa$ncells
+da <- (xa$dn+xd$dn)/xa$ncells
+
+x <- xa
+x$da <- da
+x$dd <- dd
+
+
+x <- reshape2::melt(x,measure.vars=c("dd","da"))
+p <- ggplot(x,aes(x=G,y=value,color=variable))+
+  facet_grid(cols=vars(ploidy))+
+  geom_point()+
+  scale_x_log10()
+p
+
+
+pars <- c(0.5,0.01,5)
+
+x <- split(x,f=interaction(x$variable,x$ploidy))
+
+xpar <- lapply(x,function(xi){
+  optim(pars,fit_mm,dat=xi)$par
+})
+
+xpar2N <- c(xpar[[1]],xpar[[2]])
+names(xpar2N) <- c("kd","g50d","nd","ka","g50a","na")
+xpar4N <- c(xpar[[3]],xpar[[4]])
+names(xpar4N) <- c("kd","g50d","nd","ka","g50a","na")
+
+pars2N <- c(pars2N,xpar2N)
+pars4N <- c(pars4N,xpar4N)
+
+xfit <- do.call(rbind,lapply(1:length(x),function(i){
+  pars <- xpar[[i]]
+  df <- x[[i]]
+  df$pred <- mm(pars,df)
+  df
+}))
+
+xpar <- data.frame(do.call(rbind,xpar))
+xpar <- cbind(xpar,do.call(rbind,lapply(rownames(xpar),function(ii){
+  unlist(strsplit(ii,split="[.]"))
+})))
+colnames(xpar) <- c("rmax","g50","n","celltype","ploidy")
+xpar <- reshape2::melt(xpar,id.vars=c("celltype","ploidy"))
+
+p <- ggplot(xpar,aes(x=ploidy,y=value))+
+  facet_grid(rows=vars(variable),cols=vars(celltype),scales="free")+
+  geom_col()
+p
+
+renamr <- c(dd="death",da="growth")
+xfit$variable <- renamr[xfit$variable]
+p <- ggplot(xfit,aes(x=G,y=value,color=ploidy))+
+  facet_grid(cols=vars(variable))+
+  geom_point()+
+  geom_line(aes(y=pred))+
+  scale_x_log10("glucose (mM)")+
+  scale_y_continuous("growth/death rate")
+p
+
 ```
 
 

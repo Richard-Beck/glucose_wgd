@@ -1,4 +1,4 @@
-#constrained glucose consumption and confluency cell death (Yang model, base model, with lactate and another resource).
+#constrained glucose consumption and confluency cell death (Yang model, base model).
 library(deSolve)
 
 mod <- function(Time, State, Pars){
@@ -41,8 +41,8 @@ plot_curves <- function(pars,ploidy,G=seq(0.001,1,0.001)){
   pars <- exp(pars)
   with(as.list(pars),{
     df <- data.frame(G,ploidy,
-                     div=kp*G/(G+Gmin),
-                     death=kd*(1-G/(G+Gmin)),
+                     div=G/(G+Gmin),
+                     death=(1-G/(G+Gmin)),
                      cons=v*G/(G+Gstar))
     df$ploidy <- ploidy
     df <- reshape2::melt(df,id.vars=c("G","ploidy"))
